@@ -2,20 +2,23 @@
 
 # Hermes-XLR
 
-**An optimization-first agent runtime — maximize a local GPU and Hermes, _simultaneously_.**
+**A Windows-first, optimization-first agent runtime for NVIDIA GPUs — maximize a local GPU and Hermes, _simultaneously_.**
 
 [![Status](https://img.shields.io/badge/status-design%20draft%20(v0.1)-orange)](#status--roadmap)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](#)
-[![Engine](https://img.shields.io/badge/engine-TensorRT--LLM-76B900)](https://github.com/NVIDIA/TensorRT-LLM)
+[![Local engine](https://img.shields.io/badge/local%20engine-llama.cpp%20native%20Windows-orange)](https://github.com/ggml-org/llama.cpp)
+[![Scale engine](https://img.shields.io/badge/scale%20engine-TensorRT--LLM-76B900)](https://github.com/NVIDIA/TensorRT-LLM)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%2B%20NVIDIA-76B900)](#hardware--os-support)
 [![Built on](https://img.shields.io/badge/built%20on-hermes--agent%200.16-555)](https://github.com/NousResearch/hermes-agent)
 
 </div>
 
-Hermes-XLR is a drop-in acceleration layer for the [`hermes-agent`](https://github.com/NousResearch/hermes-agent)
-framework. It plugs in at a single seam — the provider transport — detects whatever GPU it is running on, and
-emits an execution plan that **saturates that silicon**, from a 6 GB laptop to a datacenter card, without forking
-Hermes or touching its core.
+Hermes-XLR is a **Windows-first** acceleration layer for the [`hermes-agent`](https://github.com/NousResearch/hermes-agent)
+framework — it runs **natively on Windows + NVIDIA** (default engine `llama.cpp`, no WSL2). It plugs in at a
+single seam — the provider transport — detects whatever NVIDIA GPU it is running on, and emits an execution plan
+that **saturates that silicon**, from a 6 GB laptop to a 24 GB desktop — without forking Hermes or touching its
+core.
 
 > **Status: design draft (v0.1).** This repository is the **thesis + architecture**. No runtime code has landed
 > yet — see [Roadmap](#status--roadmap).
@@ -41,25 +44,25 @@ An agent turn is dominated by GPU inference, and GPU inference is **two** worklo
 a _compute-bound prefill_ (process the prompt) and a _memory-bound decode_ (generate the answer). You cannot
 out-engineer the decode wall in software — so Hermes-XLR doesn't try to. It wins by **(1)** never recomputing a
 cached prefix, **(2)** moving fewer bytes per token, **(3)** emitting more tokens per memory-read, and **(4)**
-hiding the non-inference work behind the decode it can't avoid — and it adapts those tactics to whatever GPU it
-finds.
+hiding the non-inference work behind the decode it can't avoid — and it adapts those tactics to whatever
+Windows NVIDIA GPU it finds, a 6 GB laptop through a 24 GB desktop.
 
 
 ## How it works: where the milliseconds are
 
 "Speed up" is Amdahl's law — optimize the dominant term. So, honestly, where does a turn's time go?
-(≈150-token reply, 6 GB reference GPU, illustrative.)
+(≈150-token reply, 6 GB-class GPU, illustrative.)
 
 ```
   capability mapping   ▏ 0 ms      (runs once at startup, never on the turn)
   transport glue       ▏ ~3 ms     (build request, parse SSE — Python, <0.1%)
-  prefill (cache hit)  ██ 20–80 ms (TensorRT-LLM, C++/CUDA)
-  decode (150 tok)     ████████████████████████  3,000–5,000 ms   ← THE BUDGET (TensorRT-LLM)
+  prefill (cache hit)  ██ 20–80 ms (engine, compiled C++/CUDA)
+  decode (150 tok)     ████████████████████████  3,000–5,000 ms   ← THE BUDGET (engine, C++/CUDA)
 ```
 
-The milliseconds live in the GPU, in compiled CUDA we **delegate** to TensorRT-LLM — our own code is ~0.1% of a
-turn. So you beat the budget by **shrinking inference**, not by speeding up orchestration. That is the whole game,
-and it is the four levers.
+The milliseconds live in the GPU, in compiled CUDA we **delegate** to the engine (`llama.cpp` natively on
+Windows, TensorRT-LLM for performance/scale) — our own code is ~0.1% of a turn. So you beat the budget by
+**shrinking inference**, not by speeding up orchestration. That is the whole game, and it is the four levers.
 
 ## The four levers
 
@@ -90,10 +93,11 @@ Hermes-XLR hooks Hermes at exactly **one seam — the `ProviderTransport`** — 
    │   capability mapper ──▶ ExecutionPlan ──▶ configures ▼                                   │
    └──────────────────────── engine-backend seam (OpenAI-compatible contract) ───────────────┘
      │                                   ▲ SSE token stream
-     ▼  ▶ TensorRT-LLM via trtllm-serve  │   · INT4 weights        · block reuse (lever 1)
-        (flagship, the only backend now) │   · speculative decode  · CUDA graphs
-        llama.cpp / MLX  ← seam exists,   │   · INT8/FP8 KV
-        added later, NVIDIA-first         │
+     ▼  ▶ llama.cpp — native Windows, CUDA │   · INT4 weights        · block reuse (lever 1)
+          (default local backend, no WSL2) │   · speculative decode  · CUDA graphs
+        ▶ TensorRT-LLM — performance/scale │   · INT8/FP8 KV
+          (Linux native; WSL2 on Windows)  │
+          MLX / ROCm — seam open, off-scope│
      │                                    │
      ▼  normalize_response()  ──▶ native structured tool_calls (no XML scraping)
 ```
@@ -102,8 +106,10 @@ Three components — that is the whole surface:
 
 - **Capability mapper** — probes the host and emits a typed `ExecutionPlan` (model + quant + KV config + decode
   levers + layer placement + backend), reading _detected_ capabilities, not constants.
-- **`XLRTransport`** — a Hermes transport over a **pluggable engine-backend seam**. TensorRT-LLM is the flagship
-  and only backend today; because the seam _is_ the OpenAI contract, other backends drop in below it unchanged.
+- **`XLRTransport`** — a Hermes transport over a **pluggable engine-backend seam**. Two backends in scope:
+  **`llama.cpp`** (native-Windows CUDA, no WSL2) — the **default local** backend — and **TensorRT-LLM** (Linux
+  native, WSL2 on Windows) — the **performance/scale** path; because the seam _is_ the OpenAI contract, further
+  backends (MLX/ROCm) drop in below it unchanged — open, but out of scope.
 - **Benchmark harness** — measures TTFT, prefix-cache hit rate, inter-token latency, spec-decode acceptance,
   end-to-end turn latency, and peak VRAM against an honest A/B baseline.
 
@@ -113,21 +119,53 @@ persistence, no speculative side effects).
 
 ## Scope & non-goals
 
-- **NIM-compatible, not NIM-on-6 GB.** NIM's floor is 8 GB VRAM; it will not run on the reference laptop.
-  Hermes-XLR speaks the same OpenAI contract NIM speaks — _develop on TensorRT-LLM locally, deploy to NIM at
-  scale_. We never claim NIM runs on 6 GB.
+- **NIM-compatible, not NIM-on-6 GB.** NIM's floor is 8 GB VRAM; it will not run on a 6 GB GPU.
+  Hermes-XLR speaks the same OpenAI contract NIM speaks — _develop locally on native Windows (`llama.cpp`), step
+  up to TensorRT-LLM / NIM for performance and scale_. We never claim NIM runs on 6 GB.
 - **We saturate the decode wall; we don't break it.** "Amplify" means extract the maximum from the silicon
   present — not exceed physics. There is no sub-millisecond agent loop; there is a budget, fully spent.
-- **Python above the seam, compiled where it counts.** The hot path is TensorRT-LLM's CUDA. The glue is Python
-  for velocity and portability; native code only ever arrives behind a profiler's evidence.
+- **Python above the seam, compiled where it counts.** The hot path is the engine's compiled CUDA (`llama.cpp`
+  or TensorRT-LLM). The glue is Python for velocity and portability; native code only ever arrives behind a
+  profiler's evidence.
+- **Windows + NVIDIA first; portable by architecture, not by scope.** The capability mapper and backend seam are
+  OS- and vendor-agnostic by construction, but the only paths we build and measure are Windows + NVIDIA (native
+  `llama.cpp` by default, TensorRT-LLM via WSL2 for performance). MLX / ROCm / Linux-datacenter stay reachable
+  through the seam — explicitly out of scope until the Windows NVIDIA path is proven end-to-end.
+
+## Hardware & OS support
+
+Scope is **Windows + NVIDIA**, across the full consumer GPU range. The architecture is vendor-agnostic above the
+backend seam, but Windows + NVIDIA is what we build, run, and measure.
+
+| | Supported | Notes |
+|---|---|---|
+| **GPU** | NVIDIA, Ampere → Blackwell | Verified against NVIDIA's [TensorRT-LLM support matrix](https://nvidia.github.io/TensorRT-LLM/reference/support-matrix.html): Ampere **SM80/SM86**, Ada SM89, Hopper SM90, Blackwell. **Consumer Ampere (SM86)** cards are explicitly supported. Turing/Volta have dropped off the list. |
+| **OS** | Windows 11 (+ Linux) | Two engine paths below. macOS is out of scope (no CUDA). |
+| **VRAM** | 6 GB (entry); more is better | 6 GB is tight and **unproven** until bring-up — the matrix sets no minimum, and no numbers are measured yet. |
+
+**Two engine paths on Windows — the capability mapper picks automatically, native-first:**
+
+- **`llama.cpp` (native Windows, CUDA)** — the **default local backend**: GGUF INT4, `llama-server`'s
+  OpenAI-compatible `/v1`, slot/prefix reuse, CUDA graphs, n-gram speculative decoding. **No WSL2, no engine
+  build.** The genuinely Windows-native path, and the easiest bring-up. The same backend later carries
+  Metal / ROCm / CPU portability.
+- **TensorRT-LLM — the performance / scale path**, and **Linux-only**: NVIDIA's matrix states it _"requires
+  Linux x86_64 or Linux aarch64."_ On Windows it runs through **WSL2** (opt-in, for maximum throughput). Caveat:
+  WSL2 _serves_ fine, but **engine builds are slow on the WSL2 filesystem** — build the INT4 engine on native
+  Linux (or ship a pre-built engine) and serve under WSL2. At deploy, the same OpenAI contract reaches **NIM**.
+
+> **Native Linux** (Docker Engine + NVIDIA Container Toolkit) is TensorRT-LLM's home and the lowest-overhead path
+> for it — direct GPU, ~1 GB more usable VRAM — and the recommended place to _build_ its engines.
 
 ## Status & roadmap
 
 This is **v0.1, a design proposal.** No runtime code has landed. Next, in order:
 
-1. **Capability mapper** — implement `DETECT` + `plan()`; prove it emits the reference `ExecutionPlan` on the
-   3050 and flips correctly for synthetic Ada/Hopper, multi-GPU, and tiny-VRAM offload profiles.
-2. **Bring-up** — stand up `trtllm-serve` with a concrete INT4 model; record first real VRAM + tok/s numbers.
+1. **Capability mapper** — implement `DETECT` + `plan()`; prove it emits the expected `ExecutionPlan` on the
+   local GPU and flips correctly for synthetic Ada/Hopper, multi-GPU, and tiny-VRAM offload profiles.
+2. **Bring-up** — start with the default native-Windows `llama.cpp` (no WSL2); add the TensorRT-LLM
+   performance path (native-Linux Docker, or WSL2 on Windows) afterward. Stand up an OpenAI-compatible endpoint
+   with a concrete INT4 model; record first real VRAM + tok/s numbers.
 3. **`XLRTransport`** — wire it to Hermes; verify native `tool_calls` round-trip and prefix stability.
 4. **Decode levers** — add INT4 → KV-quant → CUDA graphs → speculative decoding, A/B each.
 5. **Latency hiding** — async persistence + safe read-only prefetch + constrained tool-arg decoding.
@@ -135,7 +173,8 @@ This is **v0.1, a design proposal.** No runtime code has landed. Next, in order:
 ## Built on
 
 - **[hermes-agent](https://github.com/NousResearch/hermes-agent)** (NousResearch) — the agent framework Hermes-XLR accelerates.
-- **[TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM)** (NVIDIA) — the inference engine and `trtllm-serve` OpenAI-compatible server.
+- **[llama.cpp](https://github.com/ggml-org/llama.cpp)** (ggml-org) — the default local engine: native-Windows CUDA, `llama-server` OpenAI-compatible endpoint.
+- **[TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM)** (NVIDIA) — the performance/scale engine and `trtllm-serve` OpenAI-compatible server (Linux / WSL2).
 - **[TensorRT-Model-Optimizer](https://github.com/NVIDIA/TensorRT-Model-Optimizer)**, **[nvidia-ml-py](https://pypi.org/project/nvidia-ml-py/)**, **[nvidia-container-toolkit](https://github.com/NVIDIA/nvidia-container-toolkit)** — quantization, GPU detection, and container GPU passthrough.
 
 ## License
