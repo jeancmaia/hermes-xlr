@@ -44,20 +44,6 @@ cached prefix, **(2)** moving fewer bytes per token, **(3)** emitting more token
 hiding the non-inference work behind the decode it can't avoid — and it adapts those tactics to whatever GPU it
 finds.
 
-## Highlights
-
-- **🎯 Hardware-adaptive.** A capability mapper probes `{OS, GPU arch, VRAM, FP8, PCIe}` and emits a typed
-  `ExecutionPlan` (model, quant, KV layout, decode levers, layer placement). Same code path picks a
-  `Nemotron-4B / INT4 / INT8-KV` plan on a 6 GB Ampere laptop and a `70B / FP8-KV / draft-target` plan on an H100.
-- **🔌 Drop-in, no fork.** Integrates at Hermes' `ProviderTransport` seam. The agent core stays untouched — no
-  loop rewrite, no Rust interception layer.
-- **⚡ Four optimization levers.** Prefix-cache reuse, INT4/KV quantization, speculative decoding, and latency
-  hiding — each targeting a _measured_ part of the turn, not a guess.
-- **🧩 Layer-granular scaling.** Fully GPU-resident → multi-GPU sharding → CPU offload, chosen by an explicit
-  throughput-vs-quality objective, with the PCIe offload cliff modeled honestly.
-- **🟩 NVIDIA-first, portable by design.** TensorRT-LLM is the flagship backend behind a pluggable seam;
-  `llama.cpp` / `MLX` backends can follow without touching anything above it.
-- **📏 Honest by construction.** Every speedup is an A/B-measured target, never a hardcoded number.
 
 ## How it works: where the milliseconds are
 
@@ -134,14 +120,6 @@ persistence, no speculative side effects).
   present — not exceed physics. There is no sub-millisecond agent loop; there is a budget, fully spent.
 - **Python above the seam, compiled where it counts.** The hot path is TensorRT-LLM's CUDA. The glue is Python
   for velocity and portability; native code only ever arrives behind a profiler's evidence.
-
-## Hardware & OS support
-
-| | Reference profile (today) | Scales to |
-|---|---|---|
-| **GPU** | RTX 3050 Laptop, 6 GB (Ampere, no native FP8) | any CUDA GPU — the mapper re-plans; multi-GPU sharding / CPU offload |
-| **OS** | Windows 11 + Docker (WSL2 backend) + NVIDIA Container Toolkit | native Linux (direct GPU, ~1 GB more usable VRAM); other OSes when non-CUDA backends land |
-| **Engine** | TensorRT-LLM + `trtllm-serve` | NIM on 8 GB+/cloud — same contract |
 
 ## Status & roadmap
 
