@@ -7,7 +7,7 @@ work is tracked and how to work here.
 
 Work is tracked in **Linear**, accessed through the **Linear MCP server** (`linear-server`).
 
-- **Team:** Laiwer
+- **Team:** Hermes-XLR
 - **Project:** Hermes-NIM-XLR — Optimization-First Agent Runtime
 
 Use the Linear MCP to read and update issues, milestones, and status under this project. Treat Linear
