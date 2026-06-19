@@ -14,7 +14,7 @@ Unit conventions, matching spec.md exactly:
   bytes/s) and bytes_per_token is in raw bytes; the conversion is internal.
 """
 
-from .. import contracts
+from hermes_nim_xlr import contracts
 
 # Bytes per KV element by cache dtype (spec.md §3's "dtype_bytes").
 _KV_DTYPE_BYTES: dict[contracts.KvDtype, int] = {
@@ -73,19 +73,18 @@ def layers_that_fit(
 def decode_throughput_estimate(
     bytes_per_token: float,
     mem_bandwidth_gbs: float,
-    *,
-    gpu_frac: float = 1.0,
     cpu_frac: float = 0.0,
     pcie_bandwidth_gbs: float | None = None,
 ) -> float:
     """Decode tok/s, blending resident vs. offloaded (PCIe-bound) bandwidth
     (spec.md §2):
 
-        decode tok/s ~ bytes_per_token^-1 / (gpu_frac/bw_vram + cpu_frac/bw_pcie)
+        decode tok/s ~ bytes_per_token^-1 / ((1-cpu_frac)/bw_vram + cpu_frac/bw_pcie)
 
     Fully-resident decode (cpu_frac=0) reduces to the simple wall:
     decode throughput ~ memory_bandwidth / active_weight_bytes_per_token.
     """
+    gpu_frac = 1.0 - cpu_frac
     bw_vram = mem_bandwidth_gbs * _GB
     time_per_token = bytes_per_token * (gpu_frac / bw_vram)
     if cpu_frac:

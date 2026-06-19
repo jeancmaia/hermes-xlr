@@ -148,7 +148,6 @@ def test_decode_throughput_blended_hand_worked():
     tok_s = formulas.decode_throughput_estimate(
         bytes_per_token=2.0e9,
         mem_bandwidth_gbs=200.0,
-        gpu_frac=0.5,
         cpu_frac=0.5,
         pcie_bandwidth_gbs=20.0,
     )
@@ -166,7 +165,6 @@ def test_decode_throughput_offload_lowers_estimate_vs_fully_resident():
     offloaded = formulas.decode_throughput_estimate(
         bytes_per_token=bytes_per_token,
         mem_bandwidth_gbs=170.0,
-        gpu_frac=0.5,
         cpu_frac=0.5,
         pcie_bandwidth_gbs=24.0,
     )
