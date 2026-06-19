@@ -2,7 +2,8 @@
 
 Catalog: src/hermes_nim_xlr/mapper/catalog.py — entries grounded in spec.md
 §1.4's worked example (nvidia/Nemotron-4B-Instruct: 4.0B params, ~2200 MB,
-32 layers, INT4_AWQ).
+32 layers, INT4_AWQ), plus a wider spread of local-friendly open-weight
+families (Phi, Mistral, Gemma) at 4-9B.
 """
 
 import pytest
@@ -25,6 +26,11 @@ def test_largest_fitting_picks_nemotron_at_its_own_footprint():
 def test_largest_fitting_picks_largest_model_with_room():
     model = catalog.largest_fitting(QUANT, budget_mb=5000)
     assert model.repo == "meta-llama/Llama-3.1-8B-Instruct"
+
+
+def test_largest_fitting_picks_overall_largest_catalog_entry():
+    model = catalog.largest_fitting(QUANT, budget_mb=5300)
+    assert model.repo == "google/Gemma-2-9b-it"
 
 
 def test_largest_fitting_picks_smallest_model_at_tight_budget():
@@ -62,7 +68,7 @@ def test_largest_fully_fitting_across_budgets(budget_mb, expected_repo):
 
 
 def test_largest_fully_fitting_never_requires_offload():
-    for budget_mb in (350, 900, 1850, 2300, 4300, 5000):
+    for budget_mb in (350, 900, 1850, 2100, 2300, 4100, 4300, 5000, 5300):
         model = catalog.largest_fully_fitting(QUANT, budget_mb)
         fit = formulas.layers_that_fit(
             weight_bytes_per_layer=(model.est_weight_mb * 1024 * 1024) / model.n_layers,

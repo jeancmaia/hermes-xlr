@@ -43,10 +43,24 @@ CATALOG: tuple[contracts.ModelChoice, ...] = (
         n_layers=28,
     ),
     contracts.ModelChoice(
+        repo="microsoft/Phi-3.5-mini-instruct",
+        params_b=3.8,
+        weight_quant=contracts.WeightQuant.INT4_AWQ,
+        est_weight_mb=2100,
+        n_layers=32,
+    ),
+    contracts.ModelChoice(
         repo="nvidia/Nemotron-4B-Instruct",
         params_b=4.0,
         weight_quant=contracts.WeightQuant.INT4_AWQ,
         est_weight_mb=2200,
+        n_layers=32,
+    ),
+    contracts.ModelChoice(
+        repo="mistralai/Mistral-7B-Instruct-v0.3",
+        params_b=7.3,
+        weight_quant=contracts.WeightQuant.INT4_AWQ,
+        est_weight_mb=4100,
         n_layers=32,
     ),
     contracts.ModelChoice(
@@ -62,6 +76,13 @@ CATALOG: tuple[contracts.ModelChoice, ...] = (
         weight_quant=contracts.WeightQuant.INT4_AWQ,
         est_weight_mb=4500,
         n_layers=32,
+    ),
+    contracts.ModelChoice(
+        repo="google/Gemma-2-9b-it",
+        params_b=9.24,
+        weight_quant=contracts.WeightQuant.INT4_AWQ,
+        est_weight_mb=5200,
+        n_layers=42,
     ),
 )
 
