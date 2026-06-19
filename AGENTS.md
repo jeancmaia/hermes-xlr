@@ -22,6 +22,9 @@ you go rather than freelancing outside the plan.
 
 - **Always work on a new branch.** Never commit directly to `main`. Branch first, then make changes.
 - Keep changes scoped and reviewable; open a PR back to `main` when a unit of work is done.
+- **Branch naming:** `<type>/<ticket>-<slug>`, e.g. `feat/her-1-repo-python-package-skeleton`. Use a
+  Conventional-Commits type (`feat`, `fix`, `hotfix`, `chore`, `docs`, `refactor`, `test`) and the
+  lowercased `HER-` ticket key. Don't use the bare username-prefixed name Linear suggests by default.
 
 ### Environment & conventions
 

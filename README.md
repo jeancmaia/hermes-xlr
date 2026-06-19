@@ -157,6 +157,20 @@ backend seam, but Windows + NVIDIA is what we build, run, and measure.
 > **Native Linux** (Docker Engine + NVIDIA Container Toolkit) is TensorRT-LLM's home and the lowest-overhead path
 > for it — direct GPU, ~1 GB more usable VRAM — and the recommended place to _build_ its engines.
 
+## Repository layout
+
+```
+src/hermes_nim_xlr/
+  mapper/      capability mapper — DETECT host/GPU, PLAN the ExecutionPlan
+  transport/   XLRTransport — stateless translation seam over the engine-backend contract
+  backends/    pluggable inference-engine backends and their tuned per-backend configs
+  harness/     measurement harness — honest A/B benchmarking against a vanilla baseline
+```
+
+Each submodule maps directly to a component in [Architecture](#architecture). They start as stubs; later
+sprints (see [Status & roadmap](#status--roadmap)) fill them in. Install locally with `pip install -e .`; lint
+with `ruff check src/`.
+
 ## Status & roadmap
 
 This is **v0.1, a design proposal.** No runtime code has landed. Next, in order:
