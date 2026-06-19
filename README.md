@@ -183,6 +183,17 @@ with `ruff check src/`.
   `VersionMismatchError` on a mismatch instead of letting a misquantized checkpoint silently misload. Later
   sprints wire this to the real engine and checkpoint metadata.
 
+## Test scaffolding
+
+```
+tests/
+  conftest.py     shared fixtures
+  fixtures/        fixture data/helpers for capability-profile tests (home for S1's HER-13 synthetic-profile matrix)
+  test_sample.py  wiring proof: package import + fixture round-trip
+```
+
+Run with `pytest` (install the `dev` extra first: `pip install -e ".[dev]"`).
+
 ## Status & roadmap
 
 This is **v0.1, a design proposal.** No runtime code has landed. Next, in order:
