@@ -171,6 +171,18 @@ Each submodule maps directly to a component in [Architecture](#architecture). Th
 sprints (see [Status & roadmap](#status--roadmap)) fill them in. Install locally with `pip install -e .`; lint
 with `ruff check src/`.
 
+## Dependency policy
+
+- **Exact-pin everything.** Runtime dependencies (`[project.dependencies]`) and build-time tooling
+  (`[project.optional-dependencies.dev]`) are pinned to exact versions — no floating ranges (`>=`, `^`, `~=`).
+  There are no runtime third-party dependencies yet; the first one added must be exact-pinned.
+- **Build-time tooling stays out of the serving path.** Offline/dev-only tools (e.g. `ruff`) live under the
+  `dev` extra, never under `[project.dependencies]`.
+- **Engine ↔ checkpoint version-match gate.** `hermes_nim_xlr.backends.release_gate.assert_engine_checkpoint_match`
+  enforces that the inference-engine version matches the quantized-checkpoint toolchain version, raising
+  `VersionMismatchError` on a mismatch instead of letting a misquantized checkpoint silently misload. Later
+  sprints wire this to the real engine and checkpoint metadata.
+
 ## Status & roadmap
 
 This is **v0.1, a design proposal.** No runtime code has landed. Next, in order:
