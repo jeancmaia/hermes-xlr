@@ -109,6 +109,7 @@ _PCIE_GEN_BW: dict[int, float] = {
 # Arch detection
 # ---------------------------------------------------------------------------
 
+
 def _compute_capability_to_arch(major: int, minor: int) -> contracts.GpuArch:
     """Map a CUDA compute capability (major, minor) → GpuArch (spec.md §1.1)."""
     cc = (major, minor)
@@ -126,6 +127,7 @@ def _compute_capability_to_arch(major: int, minor: int) -> contracts.GpuArch:
 # ---------------------------------------------------------------------------
 # Bandwidth / PCIe helpers
 # ---------------------------------------------------------------------------
+
 
 def _lookup_bandwidth(
     name: str,
@@ -232,9 +234,7 @@ def _probe_gpu_pynvml() -> list[dict] | None:
         count = nvml.nvmlDeviceGetCount()
         for i in range(count):
             handle = nvml.nvmlDeviceGetHandleByIndex(i)
-            name = nvml.nvmlDeviceGetName(handle).decode(
-                "utf-8", errors="replace"
-            )
+            name = nvml.nvmlDeviceGetName(handle).decode("utf-8", errors="replace")
             mem = nvml.nvmlDeviceGetMemoryInfo(handle)
             cc_major, cc_minor = (
                 nvml.nvmlDeviceGetCudaComputeCapability(handle)
@@ -270,9 +270,17 @@ def _probe_gpu_pynvml() -> list[dict] | None:
 
 def _probe_gpu_smi() -> list[dict] | None:
     """Probe all GPUs via ``nvidia-smi`` (fallback path)."""
-    gpus = _smi_query(["index", "name", "memory.total", "memory.free",
-                         "compute_cap_major", "compute_cap_minor",
-                         "driver_version"])
+    gpus = _smi_query(
+        [
+            "index",
+            "name",
+            "memory.total",
+            "memory.free",
+            "compute_cap_major",
+            "compute_cap_minor",
+            "driver_version",
+        ]
+    )
     if gpus is None:
         return None
 
@@ -313,8 +321,12 @@ def _build_gpu(raw: dict) -> contracts.GpuCapabilities:
         vram_free_mb=raw.get("vram_free_mb", 0),
         mem_bandwidth_gbs=mem_bw,
         pcie_bandwidth_gbs=pcie_bw,
-        supports_fp8=arch in {contracts.GpuArch.ADA, contracts.GpuArch.HOPPER,
-                               contracts.GpuArch.BLACKWELL},
+        supports_fp8=arch
+        in {
+            contracts.GpuArch.ADA,
+            contracts.GpuArch.HOPPER,
+            contracts.GpuArch.BLACKWELL,
+        },
         supports_int8=cc_major > 7 or (cc_major == 7 and cc_minor >= 5),
         supports_cuda_graphs=cc_major >= 7,
         driver_version=raw.get("driver_version", ""),
@@ -351,14 +363,16 @@ def _get_cpu_ram_gb() -> float:
                     for line in result.stdout.strip().splitlines()
                     if line.strip().isdigit()
                 )
-                return round(total_bytes / (1024 ** 3), 1)
+                return round(total_bytes / (1024**3), 1)
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
         # Fallback: try Get-WmiObject via PowerShell
         try:
             result = subprocess.run(
                 [
-                    "powershell", "-NoProfile", "-Command",
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
                     "(Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory",
                 ],
                 capture_output=True,
@@ -367,7 +381,7 @@ def _get_cpu_ram_gb() -> float:
                 check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
-                return round(int(result.stdout.strip()) / (1024 ** 3), 1)
+                return round(int(result.stdout.strip()) / (1024**3), 1)
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
         return 0.0
@@ -385,12 +399,14 @@ def _get_cpu_ram_gb() -> float:
         try:
             import ctypes
             import ctypes.util
+
             libc = ctypes.CDLL(ctypes.util.find_library("c"))
             mem = ctypes.c_int64()
             size = ctypes.c_size_t(ctypes.sizeof(mem))
-            libc.sysctlbyname(b"hw.memsize", ctypes.byref(mem), ctypes.byref(size),
-                              None, 0)
-            return round(mem.value / (1024 ** 3), 1)
+            libc.sysctlbyname(
+                b"hw.memsize", ctypes.byref(mem), ctypes.byref(size), None, 0
+            )
+            return round(mem.value / (1024**3), 1)
         except Exception:  # noqa: BLE001
             pass
     return 0.0
@@ -409,10 +425,9 @@ def _detect_container_runtime() -> tuple[str | None, bool]:
     has_toolkit = shutil.which("nvidia-container-toolkit") is not None
     if not has_toolkit:
         # Some installs only leave the runtime spec
-        has_toolkit = (
-            os.path.exists("/usr/share/nvidia-container-toolkit")
-            or os.path.exists("/etc/nvidia-container-runtime")
-        )
+        has_toolkit = os.path.exists(
+            "/usr/share/nvidia-container-toolkit"
+        ) or os.path.exists("/etc/nvidia-container-runtime")
     return runtime, has_toolkit
 
 

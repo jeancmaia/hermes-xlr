@@ -17,7 +17,6 @@ import pytest
 from hermes_nim_xlr import contracts
 from hermes_nim_xlr.mapper import detect
 
-
 # ===========================================================================
 # Compute capability → GpuArch
 # ===========================================================================
@@ -26,16 +25,16 @@ from hermes_nim_xlr.mapper import detect
 @pytest.mark.parametrize(
     "major,minor,expected_arch",
     [
-        (8, 6, contracts.GpuArch.AMPERE),   # RTX 3050/3060/3070 laptop
-        (8, 0, contracts.GpuArch.AMPERE),   # A100
-        (8, 7, contracts.GpuArch.AMPERE),   # RTX 3080/3090 desktop
-        (8, 9, contracts.GpuArch.ADA),      # RTX 4090
-        (9, 0, contracts.GpuArch.HOPPER),   # H100
+        (8, 6, contracts.GpuArch.AMPERE),  # RTX 3050/3060/3070 laptop
+        (8, 0, contracts.GpuArch.AMPERE),  # A100
+        (8, 7, contracts.GpuArch.AMPERE),  # RTX 3080/3090 desktop
+        (8, 9, contracts.GpuArch.ADA),  # RTX 4090
+        (9, 0, contracts.GpuArch.HOPPER),  # H100
         (10, 0, contracts.GpuArch.BLACKWELL),
         (12, 0, contracts.GpuArch.BLACKWELL),
-        (7, 5, contracts.GpuArch.OTHER),    # Turing (no dedicated enum)
-        (7, 0, contracts.GpuArch.OTHER),    # Volta
-        (6, 1, contracts.GpuArch.OTHER),    # Pascal
+        (7, 5, contracts.GpuArch.OTHER),  # Turing (no dedicated enum)
+        (7, 0, contracts.GpuArch.OTHER),  # Volta
+        (6, 1, contracts.GpuArch.OTHER),  # Pascal
     ],
 )
 def test_compute_capability_to_arch(major, minor, expected_arch):
@@ -56,7 +55,7 @@ def test_compute_capability_to_arch(major, minor, expected_arch):
         ("NVIDIA A100-SXM4-80GB", 1555.0, 1.969 * 16),
         ("NVIDIA H100 80GB HBM3", 3352.0, 3.938 * 16),
         ("NVIDIA GeForce RTX 3080 Ti", 912.0, 1.969 * 16),  # longest-key match
-        ("NVIDIA GeForce RTX 3080", 760.0, 1.969 * 16),     # desktop variant
+        ("NVIDIA GeForce RTX 3080", 760.0, 1.969 * 16),  # desktop variant
         ("Unknown GPU Model", None, None),
         ("Intel UHD Graphics", None, None),
     ],
@@ -78,12 +77,10 @@ def test_probe_gpu_pynvml_single_gpu():
     mock_nvml.nvmlDeviceGetCount.return_value = 1
     handle = mock.MagicMock()
     mock_nvml.nvmlDeviceGetHandleByIndex.return_value = handle
-    mock_nvml.nvmlDeviceGetName.return_value = (
-        b"NVIDIA GeForce RTX 3050 6GB Laptop GPU"
-    )
+    mock_nvml.nvmlDeviceGetName.return_value = b"NVIDIA GeForce RTX 3050 6GB Laptop GPU"
     mem_info = mock.MagicMock()
-    mem_info.total = 6 * 1024 * 1024 * 1024   # 6 GB
-    mem_info.free = 5 * 1024 * 1024 * 1024     # 5 GB
+    mem_info.total = 6 * 1024 * 1024 * 1024  # 6 GB
+    mem_info.free = 5 * 1024 * 1024 * 1024  # 5 GB
     mock_nvml.nvmlDeviceGetMemoryInfo.return_value = mem_info
     mock_nvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 6)
     mock_nvml.nvmlSystemGetDriverVersion.return_value = b"555.99"
@@ -155,8 +152,7 @@ def test_probe_gpu_pynvml_nvml_init_fails():
 def test_probe_gpu_smi_parses_csv():
     """Simulate nvidia-smi CSV output for a single RTX 3050."""
     stdout = (
-        "0, NVIDIA GeForce RTX 3050 6GB Laptop GPU, 6144 MiB, 5120 MiB, "
-        "8, 6, 555.99\n"
+        "0, NVIDIA GeForce RTX 3050 6GB Laptop GPU, 6144 MiB, 5120 MiB, 8, 6, 555.99\n"
     )
     with mock.patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
@@ -271,7 +267,8 @@ def test_build_gpu_unknown():
 
 def test_detect_os_and_wsl_native_linux():
     with mock.patch("platform.system", return_value="Linux"):
-        with mock.patch("builtins.open", mock.mock_open(read_data="Linux version 6.2.0")):
+        read_data = "Linux version 6.2.0"
+        with mock.patch("builtins.open", mock.mock_open(read_data=read_data)):
             os_name, is_wsl = detect._detect_os_and_wsl()
     assert os_name == "Linux"
     assert is_wsl is False
@@ -279,9 +276,10 @@ def test_detect_os_and_wsl_native_linux():
 
 def test_detect_os_and_wsl_under_wsl():
     with mock.patch("platform.system", return_value="Linux"):
+        read_data = "Linux version 5.15.153.1-microsoft-standard-WSL2"
         with mock.patch(
             "builtins.open",
-            mock.mock_open(read_data="Linux version 5.15.153.1-microsoft-standard-WSL2"),
+            mock.mock_open(read_data=read_data),
         ):
             os_name, is_wsl = detect._detect_os_and_wsl()
     assert os_name == "Linux"
@@ -307,7 +305,11 @@ def test_detect_container_runtime_docker(mock_exists):
     assert has_toolkit is False
 
 
-@mock.patch("shutil.which", side_effect=lambda x: "/usr/bin/nvidia-container-toolkit" if "nvidia" in x else None)
+def _toolkit_which(x: str) -> str | None:
+    return "/usr/bin/nvidia-container-toolkit" if "nvidia" in x else None
+
+
+@mock.patch("shutil.which", side_effect=_toolkit_which)
 def test_detect_container_runtime_toolkit_no_docker(mock_which):
     runtime, has_toolkit = detect._detect_container_runtime()
     assert runtime is None
@@ -472,8 +474,8 @@ def test_detect_wsl_with_rtx_3050_workflow(
     assert gpu.vram_total_mb == 6144
     assert gpu.vram_free_mb == 5120
     assert gpu.mem_bandwidth_gbs == 170.0
-    assert gpu.supports_fp8 is False   # Ampere
-    assert gpu.supports_int8 is True   # CC >= 7.5
+    assert gpu.supports_fp8 is False  # Ampere
+    assert gpu.supports_int8 is True  # CC >= 7.5
     assert gpu.driver_version == "555.99"
     # Full host picture
     assert host.os == "Linux"
