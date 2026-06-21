@@ -6,7 +6,6 @@ weight quant, placement, backend, rationale, warnings).
 """
 
 import pytest
-
 from hermes_nim_xlr import contracts
 from hermes_nim_xlr.mapper import catalog as real_catalog
 from hermes_nim_xlr.mapper import planner

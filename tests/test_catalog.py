@@ -7,7 +7,6 @@ families (Phi, Mistral, Gemma) at 4-9B.
 """
 
 import pytest
-
 from hermes_nim_xlr import contracts
 from hermes_nim_xlr.mapper import catalog, formulas
 

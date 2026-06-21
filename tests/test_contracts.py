@@ -1,7 +1,6 @@
 import dataclasses
 
 import pytest
-
 from hermes_nim_xlr.contracts import (
     BackendChoice,
     BackendKind,

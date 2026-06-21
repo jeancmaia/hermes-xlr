@@ -3,7 +3,6 @@
 """
 
 import pytest
-
 from hermes_nim_xlr import contracts
 from hermes_nim_xlr.mapper import formulas
 
