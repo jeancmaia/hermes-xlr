@@ -1,14 +1,13 @@
-"""First-principles decode-wall and KV-budget formulas (spec.md §2-§3).
+"""First-principles decode-wall and KV-budget formulas.
 
-Pure functions, no hardware deps. These are the planner's quantitative core:
-_kv_bytes / _ctx_from_budget / _layers_that_fit / _decode_estimate from
-spec.md §1.3, made standalone and reusable so the model catalog (HER-9) and
-the PLAN rules (HER-12) can both call them.
+Pure functions, no hardware deps. These are the planner's quantitative core,
+made standalone and reusable so the model catalog (HER-9) and the PLAN rules
+(HER-12) can both call them.
 
-Unit conventions, matching spec.md exactly:
+Unit conventions:
 - KV-cache byte math (kv_cache_bytes / max_context_for_kv_budget) works in
   raw bytes throughout.
-- Decode-throughput math (decode_throughput_estimate) mirrors spec.md §2's
+- Decode-throughput math (decode_throughput_estimate) mirrors the spec's
   worked numbers, which divide a GB/s bandwidth by a GB-denominated weight
   size (e.g. "170 / 8.0 = 21 tok/s"). Bandwidths are GB/s (decimal, 1e9
   bytes/s) and bytes_per_token is in raw bytes; the conversion is internal.
@@ -16,14 +15,14 @@ Unit conventions, matching spec.md exactly:
 
 from hermes_nim_xlr import contracts
 
-# Bytes per KV element by cache dtype (spec.md §3's "dtype_bytes").
+# Bytes per KV element by cache dtype.
 _KV_DTYPE_BYTES: dict[contracts.KvDtype, int] = {
     contracts.KvDtype.FP16: 2,
     contracts.KvDtype.INT8: 1,
     contracts.KvDtype.FP8: 1,
 }
 
-_GB = 1_000_000_000  # decimal GB, matching spec.md's GB/s bandwidth figures
+_GB = 1_000_000_000  # decimal GB, matching GB/s bandwidth figures
 
 
 def kv_cache_bytes(
@@ -33,7 +32,7 @@ def kv_cache_bytes(
     head_dim: int,
     dtype: contracts.KvDtype,
 ) -> int:
-    """KV-bytes from context/dtype/model geometry (spec.md §3).
+    """KV-bytes from context/dtype/model geometry.
 
     KV_bytes = 2 (K,V) x layers x kv_heads x head_dim x seq_len x dtype_bytes
     """
@@ -59,10 +58,10 @@ def layers_that_fit(
     budget_bytes: int,
     total_layers: int | None = None,
 ) -> int:
-    """How many transformer layers fit resident in a VRAM budget (spec.md §1.3).
+    """How many transformer layers fit resident in a VRAM budget.
 
-    Mirrors _layers_that_fit: VRAM ÷ per-layer weight bytes, capped at the
-    model's total layer count when given.
+    VRAM ÷ per-layer weight bytes, capped at the model's total layer count
+    when given.
     """
     fit = int(budget_bytes // weight_bytes_per_layer)
     if total_layers is not None:
@@ -76,8 +75,7 @@ def decode_throughput_estimate(
     cpu_frac: float = 0.0,
     pcie_bandwidth_gbs: float | None = None,
 ) -> float:
-    """Decode tok/s, blending resident vs. offloaded (PCIe-bound) bandwidth
-    (spec.md §2):
+    """Decode tok/s, blending resident vs. offloaded (PCIe-bound) bandwidth:
 
         decode tok/s ~ bytes_per_token^-1 / ((1-cpu_frac)/bw_vram + cpu_frac/bw_pcie)
 
