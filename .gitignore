@@ -21,7 +21,10 @@ venv/
 linear-server/
 .opencode/
 
-# OS
+# Project documentation
+spec.md
+ref/
+
 opencode.json
 .DS_Store
 Thumbs.db
