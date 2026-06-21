@@ -84,8 +84,9 @@ def test_probe_gpu_pynvml_single_gpu():
     mock_nvml.nvmlDeviceGetMemoryInfo.return_value = mem_info
     mock_nvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 6)
     mock_nvml.nvmlSystemGetDriverVersion.return_value = b"555.99"
-    # hasattr(mock_nvml, "nvmlDeviceGetCudaComputeCapability") returns True for MagicMock
-    # because the attribute will be created on getattr, so hasattr also returns True
+    # hasattr(mock_nvml, "nvmlDeviceGetCudaComputeCapability") returns True
+    # for MagicMock because the attribute will be created on getattr, so hasattr
+    # also returns True
 
     with mock.patch.object(detect, "_pynvml", mock_nvml):
         gpus = detect._probe_gpu_pynvml()
@@ -116,8 +117,9 @@ def test_probe_gpu_pynvml_multi_gpu():
     mock_nvml.nvmlDeviceGetMemoryInfo.return_value = mem_info
     mock_nvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 0)
     mock_nvml.nvmlSystemGetDriverVersion.return_value = b"550.54"
-    # hasattr(mock_nvml, "nvmlDeviceGetCudaComputeCapability") returns True for MagicMock
-    # because the attribute will be created on getattr, so hasattr also returns True
+    # hasattr(mock_nvml, "nvmlDeviceGetCudaComputeCapability") returns True
+    # for MagicMock because the attribute will be created on getattr, so hasattr
+    # also returns True
 
     with mock.patch.object(detect, "_pynvml", mock_nvml):
         gpus = detect._probe_gpu_pynvml()
