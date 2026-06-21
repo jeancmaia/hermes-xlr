@@ -17,6 +17,15 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# OS
+# Linear MCP generated artifacts
+linear-server/
+.opencode/
+
+# Project documentation
+spec.md
+ref/
+
+opencode.json
 .DS_Store
 Thumbs.db
+

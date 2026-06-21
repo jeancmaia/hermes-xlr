@@ -20,11 +20,12 @@ detect = ["nvidia-ml-py>=12.0.0,<13.0.0"]
 xlr = "hermes_nim_xlr.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+# Packages are now at the repository root.
+where = ["."]
 
 [tool.ruff]
 target-version = "py311"
-src = ["src"]
+src = ["hermes_nim_xlr"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

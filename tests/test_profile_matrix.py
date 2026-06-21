@@ -25,7 +25,6 @@ pure functions, which is exactly what makes them worth goldening.
 from __future__ import annotations
 
 import pytest
-
 from hermes_nim_xlr import contracts
 from hermes_nim_xlr.mapper import catalog as real_catalog
 from hermes_nim_xlr.mapper import planner
