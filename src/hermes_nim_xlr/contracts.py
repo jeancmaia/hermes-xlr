@@ -88,6 +88,9 @@ class ModelChoice:
     weight_quant: WeightQuant
     est_weight_mb: int
     n_layers: int
+    kv_heads: int
+    head_dim: int
+    max_context_tokens: int
 
 
 @dataclass(frozen=True)

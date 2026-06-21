@@ -56,6 +56,9 @@ def _make_plan() -> ExecutionPlan:
         weight_quant=WeightQuant.INT4_AWQ,
         est_weight_mb=2200,
         n_layers=32,
+        kv_heads=8,
+        head_dim=128,
+        max_context_tokens=8192,
     )
     placement = LayerPlacement(
         total_layers=32,

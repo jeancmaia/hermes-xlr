@@ -90,21 +90,20 @@ def test_largest_fully_fitting_raises_when_nothing_is_fully_resident():
 # ---------------------------------------------------------------------------
 
 
-def test_draft_for_picks_smallest_other_model():
+def test_draft_for_picks_smallest_other_repo():
     nemotron = next(
         m for m in catalog.CATALOG if m.repo == "nvidia/Nemotron-4B-Instruct"
     )
-    draft = catalog.draft_for(nemotron)
-    assert draft.repo == "Qwen/Qwen2.5-0.5B-Instruct"
-    assert draft.est_weight_mb < nemotron.est_weight_mb
+    draft_repo = catalog.draft_for(nemotron)
+    assert draft_repo == "Qwen/Qwen2.5-0.5B-Instruct"
 
 
 def test_draft_for_never_returns_the_model_itself():
     # The smallest catalog entry still has other same-quant candidates to
     # draft from (it just can't draft for itself).
     smallest = min(catalog.CATALOG, key=lambda m: m.est_weight_mb)
-    draft = catalog.draft_for(smallest)
-    assert draft.repo != smallest.repo
+    draft_repo = catalog.draft_for(smallest)
+    assert draft_repo != smallest.repo
 
 
 # ---------------------------------------------------------------------------
@@ -117,3 +116,6 @@ def test_catalog_entries_are_plain_model_choices():
         assert isinstance(entry, contracts.ModelChoice)
         assert entry.est_weight_mb > 0
         assert entry.n_layers > 0
+        assert entry.kv_heads > 0
+        assert entry.head_dim > 0
+        assert entry.max_context_tokens > 0
