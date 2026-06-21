@@ -14,6 +14,7 @@ dependencies = []
 [project.optional-dependencies]
 # Build-time / offline tooling only -- never installed in the serving path.
 dev = ["ruff==0.15.10", "pytest==8.4.2"]
+detect = ["nvidia-ml-py>=12.0.0,<13.0.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
