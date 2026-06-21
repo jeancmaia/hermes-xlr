@@ -1,24 +1,23 @@
-"""Deterministic execution-plan generator - the PLAN phase (spec.md §1.3).
+"""Deterministic execution-plan generator - the PLAN phase.
 
 ``plan()`` is a pure function from ``HostCapabilities`` to
-``ExecutionPlan``. It applies the five auditable Rules from the spec and
-records the reasoning behind every branch in ``rationale``. There is no
-per-turn entropy, no probe side-effects, and no dependence on anything but
-the supplied ``HostCapabilities`` record and catalog.
+``ExecutionPlan``. It applies five auditable rules and records the
+reasoning behind every branch in ``rationale``. There is no per-turn
+entropy, no probe side-effects, and no dependence on anything but the
+supplied ``HostCapabilities`` record and catalog.
 """
 
 from hermes_nim_xlr import contracts
 from hermes_nim_xlr.mapper import catalog, formulas
 
 _SAFETY_MB = 768  # activations + framework/runtime overhead headroom
-_KB = 1024
 _MB = 1024 * 1024
 
 # Decode-throughput range is inherently noisy (cache hit rate, launch
-# overhead, actual power state). The spec anchors estimates like
-# "~30-50 tok/s" on the reference 3050. We express the range as a
-# conservative band around the first-principles wall so the numbers are
-# honest without pretending to be exact.
+# overhead, actual power state). The reference 3050 anchors estimates like
+# "~30-50 tok/s". We express the range as a conservative band around the
+# first-principles wall so the numbers are honest without pretending to be
+# exact.
 _DECODE_EFFICIENCY_LOW = 0.40
 _DECODE_EFFICIENCY_HIGH = 0.65
 
@@ -26,7 +25,7 @@ _DECODE_EFFICIENCY_HIGH = 0.65
 def _primary_gpu(host: contracts.HostCapabilities) -> contracts.GpuCapabilities:
     """Return the GPU with the most free VRAM.
 
-    CPU-only hosts error until a CPU backend ships (spec.md §1.1).
+    CPU-only hosts error until a CPU backend ships.
     """
     if not host.gpus:
         raise ValueError("no GPU detected; CPU-only execution is not supported yet")
@@ -36,7 +35,7 @@ def _primary_gpu(host: contracts.HostCapabilities) -> contracts.GpuCapabilities:
 def _kv_bytes(
     target_ctx: int, kv_dtype: contracts.KvDtype, model: contracts.ModelChoice
 ) -> int:
-    """KV-cache bytes for ``target_ctx`` tokens (spec.md §3)."""
+    """KV-cache bytes for ``target_ctx`` tokens."""
     return formulas.kv_cache_bytes(
         seq_len=target_ctx,
         n_layers=model.n_layers,
@@ -49,8 +48,9 @@ def _kv_bytes(
 def _ctx_from_budget(
     kv_budget_mb: int, kv_dtype: contracts.KvDtype, model: contracts.ModelChoice
 ) -> int:
-    """Maximum context length invertable from the KV budget, capped by the
-    model's own context ceiling (spec.md §3).
+    """Maximum context length invertable from the KV budget.
+
+    The result is clamped to the model's own context ceiling.
     """
     safe_budget_mb = max(kv_budget_mb, 0)
     ctx = formulas.max_context_for_kv_budget(
@@ -66,10 +66,10 @@ def _ctx_from_budget(
 def _layers_that_fit(model: contracts.ModelChoice, vram_budget_mb: int) -> int:
     """How many transformer layers fit inside ``vram_budget_mb``.
 
-    This is the layer-granularity check from spec.md §1.3 Rule 3.5. Using a
-    plain VRAM budget (rather than the post-weight KV budget) keeps the
-    placement decision physically meaningful: if the model's total weight
-    exceeds the VRAM we are willing to allocate, layers spill.
+    This is the layer-granularity placement check. Using a plain VRAM
+    budget (rather than the post-weight KV budget) keeps the decision
+    physically meaningful: if the model's total weight exceeds the VRAM we
+    are willing to allocate, layers spill.
     """
     weight_bytes_per_layer = (model.est_weight_mb * _MB) / model.n_layers
     return formulas.layers_that_fit(
@@ -80,7 +80,7 @@ def _layers_that_fit(model: contracts.ModelChoice, vram_budget_mb: int) -> int:
 
 
 def _resident(model: contracts.ModelChoice) -> contracts.LayerPlacement:
-    """Fully GPU-resident placement (spec.md §1.3 Rule 3.5)."""
+    """Fully GPU-resident placement."""
     return contracts.LayerPlacement(
         total_layers=model.n_layers,
         gpu_layers=model.n_layers,
@@ -94,7 +94,7 @@ def _resident(model: contracts.ModelChoice) -> contracts.LayerPlacement:
 def _shard_across_gpus(
     model: contracts.ModelChoice, gpus: tuple[contracts.GpuCapabilities, ...]
 ) -> contracts.LayerPlacement:
-    """Tensor-parallel placement across all detected GPUs (spec.md §1.3)."""
+    """Tensor-parallel placement across all detected GPUs."""
     return contracts.LayerPlacement(
         total_layers=model.n_layers,
         gpu_layers=model.n_layers,
@@ -106,7 +106,7 @@ def _shard_across_gpus(
 
 
 def _cliff(gpu: contracts.GpuCapabilities) -> float:
-    """PCIe-vs-VRAM slowdown multiplier for CPU-offloaded layers (spec.md §2).
+    """PCIe-vs-VRAM slowdown multiplier for CPU-offloaded layers.
 
     Returns a conservative fallback when either bandwidth is unknown.
     """
@@ -121,7 +121,7 @@ def _decode_estimate(
     placement: contracts.LayerPlacement,
 ) -> tuple[int, int]:
     """Decode throughput band, blending VRAM and PCIe bandwidth if layers are
-    offloaded (spec.md §2).
+    offloaded.
     """
     if gpu.mem_bandwidth_gbs is None:
         return (0, 0)
@@ -151,7 +151,7 @@ def _select_model_for_objective(
     ``THROUGHPUT_FIRST`` respects the 0.55 VRAM budget: it wants the largest
     model that still leaves headroom for the KV cache. ``QUALITY_FIRST``
     ignores that cap and takes the strongest model available for the chosen
-    quant, accepting that layers may have to CPU-offload (spec.md §1.3).
+    quant, accepting that layers may have to CPU-offload.
     """
     if objective is contracts.Objective.QUALITY_FIRST:
         candidates = [m for m in catalog_ref.CATALOG if m.weight_quant is weight_quant]
@@ -165,23 +165,19 @@ def plan(
     host: contracts.HostCapabilities,
     catalog_ref: object = catalog,
     objective: contracts.Objective = contracts.Objective.THROUGHPUT_FIRST,
-    prefer_performance: bool = False,
 ) -> contracts.ExecutionPlan:
     """Generate a deterministic execution plan from host capabilities.
 
-    Implements the five Rules from spec.md §1.3. Every branch appends a
-    human-readable rationale line; laptop/shared-display GPUs generate a
-    warning. The function is pure: identical input always yields identical
-    output.
+    Every branch appends a human-readable rationale line;
+    laptop/shared-display GPUs generate a warning. The function is pure:
+    identical input always yields identical output.
 
     Args:
-        host: The detected host/GPU capabilities (HER-8).
+        host: The detected host/GPU capabilities.
         catalog_ref: A catalog module/object exposing ``largest_fitting``,
             ``largest_fully_fitting``, ``draft_for`` and ``CATALOG``.
         objective: ``THROUGHPUT_FIRST`` avoids CPU offload;
             ``QUALITY_FIRST`` accepts a PCIe cliff to run a stronger model.
-        prefer_performance: Opt into the TensorRT-LLM / WSL2 performance
-            path on Windows when a container runtime is available.
 
     Returns:
         An immutable ``ExecutionPlan`` ready for the backend seam.
@@ -247,10 +243,7 @@ def plan(
             cpu_offload_layers=model.n_layers - fit,
             tensor_parallel=1,
             pipeline_parallel=1,
-            note=(
-                "PCIe-bound CPU offload - decode cliff (spec.md §2); "
-                "honored by llama.cpp, not TRT-LLM"
-            ),
+            note="PCIe-bound CPU offload - decode cliff",
         )
         warnings.append(
             f"{placement.cpu_offload_layers}/{model.n_layers} layers on CPU - "
@@ -272,37 +265,15 @@ def plan(
         draft_choice = None
         why.append("n-gram spec-decode: no VRAM for a draft model (zero-cost path)")
 
-    if host.os == "Linux" and not host.is_wsl:
-        backend = contracts.BackendChoice(
-            contracts.BackendKind.TRTLLM,
-            contracts.BringUp.NATIVE_LINUX,
-            "http://127.0.0.1:8000/v1",
-        )
-        why.append("TensorRT-LLM native on Linux - the performance/scale backend")
-    elif (
-        prefer_performance
-        and host.container_runtime
-        and host.has_nvidia_container_toolkit
-    ):
-        backend = contracts.BackendChoice(
-            contracts.BackendKind.TRTLLM,
-            contracts.BringUp.WSL2_DOCKER,
-            "http://127.0.0.1:8000/v1",
-        )
-        why.append(
-            "performance path: TensorRT-LLM via WSL2 "
-            "(build engine on native Linux - WSL2 builds are slow)"
-        )
-    else:
-        backend = contracts.BackendChoice(
-            contracts.BackendKind.LLAMACPP,
-            contracts.BringUp.NATIVE_WINDOWS,
-            "http://127.0.0.1:8080/v1",
-        )
-        why.append(
-            "default native-Windows llama.cpp (CUDA, no WSL2) - "
-            "the Windows-tuned local backend"
-        )
+    backend = contracts.BackendChoice(
+        contracts.BackendKind.LLAMACPP,
+        contracts.BringUp.NATIVE_WINDOWS,
+        "http://127.0.0.1:8080/v1",
+    )
+    why.append(
+        "default native-Windows llama.cpp (CUDA, no WSL2) - "
+        "the Windows-tuned local backend"
+    )
 
     target_ctx = _ctx_from_budget(kv_budget, kv_dtype, model)
     est_vram_mb = (
@@ -311,10 +282,7 @@ def plan(
     est_toks = _decode_estimate(primary_gpu, model, placement)
 
     if "Laptop" in (primary_gpu.name or ""):
-        warnings.append(
-            "shared display GPU - expect eviction; "
-            "enable prefill warming (spec.md §4.5)"
-        )
+        warnings.append("shared display GPU - expect eviction; enable prefill warming")
 
     kv_fraction = round(kv_budget / usable_total, 2) if usable_total else 0.0
 

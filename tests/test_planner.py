@@ -1,9 +1,8 @@
-"""Tests for the deterministic planner (HER-12 / spec.md §1.3).
+"""Tests for the deterministic planner (HER-12).
 
 Builds synthetic HostCapabilities records so the planner can be exercised
 without real hardware, then checks the structural decisions (KV dtype,
-weight quant, placement, backend, rationale, warnings) against the spec's
-expectations.
+weight quant, placement, backend, rationale, warnings).
 """
 
 import pytest
@@ -48,22 +47,20 @@ def _host(
     *gpus: contracts.GpuCapabilities,
     os_name: str = "Windows",
     is_wsl: bool = False,
-    container_runtime: str | None = None,
-    has_toolkit: bool = False,
 ) -> contracts.HostCapabilities:
     return contracts.HostCapabilities(
         os=os_name,
         is_wsl=is_wsl,
         cpu_ram_gb=32.0,
-        container_runtime=container_runtime,
-        has_nvidia_container_toolkit=has_toolkit,
+        container_runtime=None,
+        has_nvidia_container_toolkit=False,
         gpus=gpus,
     )
 
 
 # ---------------------------------------------------------------------------
 # Reference golden: RTX 3050 6 GB Laptop, Windows, throughput-first.
-# This is the worked example from spec.md §1.4, checked structurally.
+# This is the worked example from the design doc, checked structurally.
 # ---------------------------------------------------------------------------
 
 
@@ -115,11 +112,11 @@ def test_reference_rtx_3050_emits_expected_plan():
 
 
 # ---------------------------------------------------------------------------
-# Ada / Hopper + native Linux → FP8 KV, draft-target, TRT-LLM native.
+# Ada / Hopper → FP8 KV and draft-target, still native-Windows llama.cpp.
 # ---------------------------------------------------------------------------
 
 
-def test_ada_desktop_linux_prefers_fp8_and_draft_target():
+def test_ada_desktop_prefers_fp8_and_draft_target():
     rtx4090 = _gpu(
         "NVIDIA GeForce RTX 4090",
         contracts.GpuArch.ADA,
@@ -129,13 +126,7 @@ def test_ada_desktop_linux_prefers_fp8_and_draft_target():
         mem_bw=1008.0,
         pcie_bw=1.969 * 16,
     )
-    host = _host(
-        rtx4090,
-        os_name="Linux",
-        is_wsl=False,
-        container_runtime="docker",
-        has_toolkit=True,
-    )
+    host = _host(rtx4090)
 
     plan = planner.plan(host, catalog_ref=real_catalog)
 
@@ -143,8 +134,8 @@ def test_ada_desktop_linux_prefers_fp8_and_draft_target():
     assert plan.model.weight_quant is contracts.WeightQuant.INT8
     assert plan.levers.spec_decode is contracts.SpecDecode.DRAFT_TARGET
     assert plan.levers.draft_model is not None
-    assert plan.backend.kind is contracts.BackendKind.TRTLLM
-    assert plan.backend.bring_up is contracts.BringUp.NATIVE_LINUX
+    assert plan.backend.kind is contracts.BackendKind.LLAMACPP
+    assert plan.backend.bring_up is contracts.BringUp.NATIVE_WINDOWS
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +157,7 @@ def test_multi_gpu_profile_chooses_sharding_not_offload():
         mem_bw=170.0,
         pcie_bw=1.969 * 8,
     )
-    host = _host(small_ampere, small_ampere, os_name="Linux", is_wsl=False)
+    host = _host(small_ampere, small_ampere)
 
     plan = planner.plan(host, catalog_ref=real_catalog)
 
@@ -228,38 +219,6 @@ def test_quality_first_can_accept_cpu_offload():
     assert plan.objective is contracts.Objective.QUALITY_FIRST
     assert plan.placement.cpu_offload_layers > 0
     assert any("layers on CPU" in w for w in plan.warnings)
-
-
-# ---------------------------------------------------------------------------
-# Windows + prefer_performance + toolkit → WSL2 TRT-LLM path.
-# ---------------------------------------------------------------------------
-
-
-def test_windows_prefer_performance_selects_wsl2_trtllm():
-    rtx4090 = _gpu(
-        "NVIDIA GeForce RTX 4090",
-        contracts.GpuArch.ADA,
-        (8, 9),
-        vram_total_mb=24576,
-        vram_free_mb=22000,
-        mem_bw=1008.0,
-        pcie_bw=1.969 * 16,
-    )
-    host = _host(
-        rtx4090,
-        os_name="Windows",
-        container_runtime="docker",
-        has_toolkit=True,
-    )
-
-    plan = planner.plan(
-        host,
-        catalog_ref=real_catalog,
-        prefer_performance=True,
-    )
-
-    assert plan.backend.kind is contracts.BackendKind.TRTLLM
-    assert plan.backend.bring_up is contracts.BringUp.WSL2_DOCKER
 
 
 # ---------------------------------------------------------------------------

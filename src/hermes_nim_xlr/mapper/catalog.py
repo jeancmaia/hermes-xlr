@@ -1,4 +1,4 @@
-"""Candidate-model catalog and budget-driven selection helpers (spec.md §1.3).
+"""Candidate-model catalog and budget-driven selection helpers.
 
 Static data only — no hardware coupling. Selection helpers take a plain
 budget_mb argument; the caller (the PLAN rules, HER-12) derives that budget
@@ -17,11 +17,11 @@ from hermes_nim_xlr.mapper import formulas
 _MB = 1024 * 1024
 
 # A realistic spread of instruction-tuned models sized for the Windows +
-# NVIDIA local-fit range this project targets (spec.md §1, §6). The
-# nvidia/Nemotron-4B-Instruct footprint matches spec.md §1.4's worked
-# example exactly (4.0B params, ~2200 MB, 32 layers, INT4_AWQ). Geometry
-# fields (kv_heads, head_dim, max_context_tokens) are required by the §3
-# KV-cache budget inversion that plan() performs (HER-12).
+# NVIDIA local-fit range this project targets. The
+# nvidia/Nemotron-4B-Instruct footprint matches the reference worked example
+# (4.0B params, ~2200 MB, 32 layers, INT4_AWQ). Geometry fields
+# (kv_heads, head_dim, max_context_tokens) are required by the KV-cache
+# budget inversion that plan() performs (HER-12).
 _CATALOG_INT4_AWQ: tuple[contracts.ModelChoice, ...] = (
     contracts.ModelChoice(
         repo="Qwen/Qwen2.5-0.5B-Instruct",
@@ -115,8 +115,8 @@ _CATALOG_INT4_AWQ: tuple[contracts.ModelChoice, ...] = (
     ),
 )
 
-# INT8-quantized variants for budgets >= 12 GB (spec.md §1.3 Rule 2). Footprints
-# and geometry mirror the INT4 families; only weight_quant changes.
+# INT8-quantized variants for budgets >= 12 GB. Footprints and geometry
+# mirror the INT4 families; only weight_quant changes.
 _CATALOG_INT8: tuple[contracts.ModelChoice, ...] = (
     contracts.ModelChoice(
         repo="Qwen/Qwen2.5-0.5B-Instruct-INT8",
@@ -226,8 +226,8 @@ def largest_fitting(
 ) -> contracts.ModelChoice:
     """Largest model whose total weight footprint fits budget_mb.
 
-    A footprint check only (spec.md §1.3 Rule 3) — does not guarantee every
-    layer is GPU-resident; use largest_fully_fitting for that guarantee.
+    A footprint check only — does not guarantee every layer is GPU-resident;
+    use largest_fully_fitting for that guarantee.
     """
     fitting = [m for m in _candidates(weight_quant) if m.est_weight_mb <= budget_mb]
     if not fitting:
@@ -263,7 +263,7 @@ def largest_fully_fitting(
 
 def draft_for(model: contracts.ModelChoice) -> str:
     """Repo id of the smallest same-quant model (other than ``model``) suitable
-    as a speculative-decode draft for ``model`` (spec.md §4.3 draft-target).
+    as a speculative-decode draft for ``model``.
     """
     candidates = [m for m in _candidates(model.weight_quant) if m.repo != model.repo]
     if not candidates:

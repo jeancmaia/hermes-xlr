@@ -30,11 +30,7 @@ def _serialize_plan(execution_plan: contracts.ExecutionPlan) -> str:
 def _cmd_plan(args: argparse.Namespace) -> int:
     host = detect.detect()
     objective = contracts.Objective(args.objective)
-    execution_plan = plan(
-        host,
-        objective=objective,
-        prefer_performance=args.prefer_performance,
-    )
+    execution_plan = plan(host, objective=objective)
     print(_serialize_plan(execution_plan))
     return 0
 
@@ -55,11 +51,6 @@ def main(argv: list[str] | None = None) -> int:
             contracts.Objective.QUALITY_FIRST.value,
         ],
         default=contracts.Objective.THROUGHPUT_FIRST.value,
-    )
-    plan_parser.add_argument(
-        "--prefer-performance",
-        action="store_true",
-        help="opt into the TensorRT-LLM / WSL2 performance path on Windows",
     )
 
     args = parser.parse_args(argv)

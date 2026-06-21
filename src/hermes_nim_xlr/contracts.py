@@ -1,10 +1,10 @@
-"""The ExecutionPlan contract — frozen dataclasses + enums every downstream layer
+"""The ExecutionPlan contract - frozen dataclasses + enums every downstream layer
 consumes.
 
 Pure stdlib, zero hardware/heavy-import dependencies (importable on any host,
 no CUDA/torch). Field names for KvCacheConfig map 1:1 onto TensorRT-LLM's real
 KVCacheConfig (enable_block_reuse, free_gpu_memory_fraction,
-host_cache_size_bytes) per spec.md §1.2 — no invented flags.
+host_cache_size_bytes) - no invented flags.
 """
 
 from dataclasses import dataclass
@@ -94,7 +94,7 @@ class ModelChoice:
 
 
 @dataclass(frozen=True)
-class KvCacheConfig:  # <-> TensorRT-LLM KVCacheConfig (real field names, spec.md §1.2)
+class KvCacheConfig:  # maps to TensorRT-LLM KVCacheConfig real field names
     dtype: KvDtype
     enable_block_reuse: bool
     free_gpu_memory_fraction: float
