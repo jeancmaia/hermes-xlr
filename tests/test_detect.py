@@ -84,6 +84,8 @@ def test_probe_gpu_pynvml_single_gpu():
     mock_nvml.nvmlDeviceGetMemoryInfo.return_value = mem_info
     mock_nvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 6)
     mock_nvml.nvmlSystemGetDriverVersion.return_value = b"555.99"
+    # hasattr(mock_nvml, "nvmlDeviceGetCudaComputeCapability") returns True for MagicMock
+    # because the attribute will be created on getattr, so hasattr also returns True
 
     with mock.patch.object(detect, "_pynvml", mock_nvml):
         gpus = detect._probe_gpu_pynvml()
@@ -114,6 +116,8 @@ def test_probe_gpu_pynvml_multi_gpu():
     mock_nvml.nvmlDeviceGetMemoryInfo.return_value = mem_info
     mock_nvml.nvmlDeviceGetCudaComputeCapability.return_value = (8, 0)
     mock_nvml.nvmlSystemGetDriverVersion.return_value = b"550.54"
+    # hasattr(mock_nvml, "nvmlDeviceGetCudaComputeCapability") returns True for MagicMock
+    # because the attribute will be created on getattr, so hasattr also returns True
 
     with mock.patch.object(detect, "_pynvml", mock_nvml):
         gpus = detect._probe_gpu_pynvml()
@@ -449,7 +453,7 @@ def test_detect_wsl_with_rtx_3050_workflow(
 ):
     """Simulate the reference profile — RTX 3050 6GB Laptop under WSL.
 
-    This mirrors spec.md §1.4's worked example.
+    This mirrors the worked example from HER-8.
     """
     mock_os_wsl.return_value = ("Linux", True)
     mock_ram.return_value = 16.0

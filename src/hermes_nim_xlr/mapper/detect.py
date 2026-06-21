@@ -1,4 +1,4 @@
-"""Host & GPU probe — the DETECT phase (spec.md §1.1).
+"""Host & GPU probe — the DETECT phase.
 
 Discovers the host's GPU(s), OS, and runtime environment using:
   - pynvml (``nvidia-ml-py``) as the primary GPU probe — cheap to import,
@@ -17,101 +17,28 @@ from __future__ import annotations
 
 import os
 import platform
-import re
 import shutil
 import subprocess
 import sys
 
 from hermes_nim_xlr import contracts
+from hermes_nim_xlr.mapper._bandwidths import _lookup_bandwidth
 
 # pynvml is optional — imported lazily in _probe_gpu_pynvml so the module
-# stays importable without it.  The _HAS_PYNVML sentinel avoids re-trying
-# the import every call.
+# stays importable without it.
 try:
     import pynvml as _pynvml  # type: ignore[import-untyped]
-
-    _HAS_PYNVML = True
 except ImportError:
     _pynvml = None  # type: ignore[assignment]
-    _HAS_PYNVML = False
 
 
-# ---------------------------------------------------------------------------
-# Static bandwidth lookup table
-#
-# Memory bandwidth (GB/s) and typical PCIe generation / lane count for common
-# NVIDIA GPUs.  Keyed by substrings matched against the GPU name string.
-# Unknown GPUs produce None for bandwidths.
-# ---------------------------------------------------------------------------
-
-_BANDWIDTH_ENTRY = tuple[float | None, int | None, int | None]
-"""A (mem_bandwidth_gbs, pcie_gen, pcie_lanes) row."""
-
-_BANDWIDTH_LOOKUP: dict[str, list[_BANDWIDTH_ENTRY]] = {
-    # ---- GeForce RTX 30-series (Ampere) ----
-    "RTX 3050": [(224.0, 4, 8)],
-    "RTX 3050 Laptop": [(170.0, 4, 8)],
-    "RTX 3060": [(360.0, 4, 16)],
-    "RTX 3060 Laptop": [(192.0, 4, 8)],
-    "RTX 3060 Ti": [(448.0, 4, 16)],
-    "RTX 3070": [(448.0, 4, 16)],
-    "RTX 3070 Laptop": [(384.0, 4, 8)],
-    "RTX 3070 Ti": [(448.0, 4, 16)],
-    "RTX 3080": [(760.0, 4, 16)],
-    "RTX 3080 Laptop": [(384.0, 4, 8)],
-    "RTX 3080 Ti": [(912.0, 4, 16)],
-    "RTX 3090": [(936.0, 4, 16)],
-    "RTX 3090 Ti": [(1008.0, 4, 16)],
-    # ---- GeForce RTX 40-series (Ada Lovelace) ----
-    "RTX 4050 Laptop": [(192.0, 4, 8)],
-    "RTX 4060": [(272.0, 4, 8)],
-    "RTX 4060 Laptop": [(256.0, 4, 8)],
-    "RTX 4060 Ti": [(288.0, 4, 8)],
-    "RTX 4070": [(504.0, 4, 16)],
-    "RTX 4070 Laptop": [(256.0, 4, 8)],
-    "RTX 4070 Ti": [(576.0, 4, 16)],
-    "RTX 4070 Ti Super": [(672.0, 4, 16)],
-    "RTX 4080": [(736.0, 4, 16)],
-    "RTX 4080 Laptop": [(512.0, 4, 8)],
-    "RTX 4080 Super": [(736.0, 4, 16)],
-    "RTX 4090": [(1008.0, 4, 16)],
-    "RTX 4090 Laptop": [(576.0, 4, 8)],
-    # ---- GeForce RTX 50-series (Blackwell) ----
-    "RTX 5060": [(512.0, 5, 8)],
-    "RTX 5070": [(672.0, 5, 16)],
-    "RTX 5080": [(960.0, 5, 16)],
-    "RTX 5090": [(1792.0, 5, 16)],
-    "RTX 5090 Laptop": [(880.0, 5, 8)],
-    # ---- Enterprise / Pro ----
-    "A100": [(1555.0, 4, 16)],
-    "H100": [(3352.0, 5, 16)],
-    "B200": [(4304.0, 5, 16)],
-    "T4": [(320.0, 3, 16)],
-    "L4": [(300.0, 4, 16)],
-    "L40S": [(864.0, 4, 16)],
-    "A10": [(600.0, 4, 16)],
-    "A30": [(933.0, 4, 16)],
-    "A40": [(696.0, 4, 16)],
-}
-
-# PCIe per-lane bandwidth in GB/s (bidirectional, 1e9 bytes).
-_PCIE_GEN_BW: dict[int, float] = {
-    1: 0.250,
-    2: 0.500,
-    3: 0.985,
-    4: 1.969,
-    5: 3.938,
-    6: 7.563,
-}
-
-
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 # Arch detection
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 
 
 def _compute_capability_to_arch(major: int, minor: int) -> contracts.GpuArch:
-    """Map a CUDA compute capability (major, minor) → GpuArch (spec.md §1.1)."""
+    """Map a CUDA compute capability (major, minor) → GpuArch."""
     cc = (major, minor)
     if cc >= (10, 0):
         return contracts.GpuArch.BLACKWELL
@@ -124,56 +51,18 @@ def _compute_capability_to_arch(major: int, minor: int) -> contracts.GpuArch:
     return contracts.GpuArch.OTHER
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 # Bandwidth / PCIe helpers
-# ---------------------------------------------------------------------------
-
-
-def _lookup_bandwidth(
-    name: str,
-) -> tuple[float | None, float | None]:
-    """Lookup memory bandwidth (GB/s) and PCIe bandwidth (GB/s) by GPU name.
-
-    Matching uses **word-level token overlap** rather than substring matching,
-    so a key ``"RTX 3050 Laptop"`` correctly matches the NVIDIA name
-    ``"NVIDIA GeForce RTX 3050 6GB Laptop GPU"`` (every word in the key
-    appears in the name as a token, even though the full substring does not).
-
-    The longest key (by character length) whose every word-token appears in
-    the GPU name wins — this gives correct greedy behavior for qualified names
-    (``"RTX 3080 Ti"`` beats ``"RTX 3080"``).
-    """
-    name_lower = name.lower()
-    # Split on any non-alphanumeric boundary so hyphenated tokens like
-    # "A100-SXM4-80GB" produce individual words: {"a100", "sxm4", "80gb"}.
-    name_tokens = set(re.split(r"[^a-z0-9]+", name_lower))
-
-    matched_key = ""
-    matched_entry: _BANDWIDTH_ENTRY | None = None
-
-    for key, entries in _BANDWIDTH_LOOKUP.items():
-        key_tokens = key.lower().split()
-        if not key_tokens:
-            continue
-        # Every word in the key must appear somewhere in the GPU name.
-        if all(t in name_tokens for t in key_tokens):
-            if len(key) > len(matched_key):
-                matched_key = key
-                matched_entry = entries[0]
-
-    if matched_entry is None:
-        return None, None
-
-    mem_bw, pcie_gen, pcie_lanes = matched_entry
-    if pcie_gen is not None and pcie_lanes is not None:
-        pcie_bw = _PCIE_GEN_BW.get(pcie_gen, 1.969) * pcie_lanes
-    else:
-        pcie_bw = None
-    return mem_bw, pcie_bw
+# ---------------------------------------------------------------------------#
 
 
 def _smi_query(fields: list[str]) -> list[dict[str, str]] | None:
-    """Run ``nvidia-smi --query-gpu=...`` and parse CSV per-GPU rows."""
+    """Run ``nvidia-smi --query-gpu=...`` and parse CSV per-GPU rows.
+
+    The ``fields`` parameter must be ordered as:
+    [index, name, memory.total, memory.free, compute_cap_major,
+    compute_cap_minor, driver_version]
+    """
     csv_fields = ",".join(fields)
     try:
         result = subprocess.run(
@@ -209,9 +98,9 @@ def _smi_query(fields: list[str]) -> list[dict[str, str]] | None:
     return gpus if gpus else None
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 # Probes
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 
 
 def _probe_gpu_pynvml() -> list[dict] | None:
@@ -289,14 +178,20 @@ def _probe_gpu_smi() -> list[dict] | None:
         try:
             cc_major = int(gpu.get("compute_cap_major", "0"))
             cc_minor = int(gpu.get("compute_cap_minor", "0"))
+            index = int(gpu.get("index", 0))
+            vram_total_mb = int(gpu.get("memory.total", "0"))
+            vram_free_mb = int(gpu.get("memory.free", "0"))
         except (ValueError, TypeError):
             cc_major, cc_minor = 0, 0
+            index = 0
+            vram_total_mb = 0
+            vram_free_mb = 0
         result.append(
             {
-                "index": int(gpu.get("index", 0)),
+                "index": index,
                 "name": gpu.get("name", ""),
-                "vram_total_mb": int(gpu.get("memory.total", "0")),
-                "vram_free_mb": int(gpu.get("memory.free", "0")),
+                "vram_total_mb": vram_total_mb,
+                "vram_free_mb": vram_free_mb,
                 "compute_cap_major": cc_major,
                 "compute_cap_minor": cc_minor,
                 "driver_version": gpu.get("driver_version", ""),
@@ -334,7 +229,7 @@ def _build_gpu(raw: dict) -> contracts.GpuCapabilities:
 
 
 def _detect_os_and_wsl() -> tuple[str, bool]:
-    """Detect OS and whether running inside WSL (spec.md §1.1)."""
+    """Detect OS and whether running inside WSL."""
     os_name = platform.system()
     is_wsl = False
     if os_name == "Linux":
@@ -358,6 +253,7 @@ def _get_cpu_ram_gb() -> float:
                 check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
+                # wmic output: "Capacity\n<bytes>\n..."; header skipped by isdigit()
                 total_bytes = sum(
                     int(line.strip())
                     for line in result.stdout.strip().splitlines()
@@ -386,15 +282,7 @@ def _get_cpu_ram_gb() -> float:
             pass
         return 0.0
 
-    # Linux / macOS
-    try:
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    kb = int(line.split()[1])
-                    return round(kb / (1024 * 1024), 1)
-    except OSError:
-        pass
+    # macOS
     if sys.platform == "darwin":
         try:
             import ctypes
@@ -409,6 +297,17 @@ def _get_cpu_ram_gb() -> float:
             return round(mem.value / (1024**3), 1)
         except Exception:  # noqa: BLE001
             pass
+
+    # Linux
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return round(kb / (1024 * 1024), 1)
+    except OSError:
+        pass
+
     return 0.0
 
 
@@ -422,6 +321,7 @@ def _detect_container_runtime() -> tuple[str | None, bool]:
         runtime = "docker"
     elif shutil.which("podman"):
         runtime = "podman"
+    # Prefer Docker over Podman when both are installed.
     has_toolkit = shutil.which("nvidia-container-toolkit") is not None
     if not has_toolkit:
         # Some installs only leave the runtime spec
@@ -431,13 +331,13 @@ def _detect_container_runtime() -> tuple[str | None, bool]:
     return runtime, has_toolkit
 
 
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 # Public API
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------#
 
 
 def detect() -> contracts.HostCapabilities:
-    """Probe the host and return its capabilities (spec.md §1.1 DETECT).
+    """Probe the host and return its capabilities.
 
     This is the primary entry point for the mapper's DETECT phase.  It
     probes GPUs via pynvml (primary) or ``nvidia-smi`` (fallback), detects
