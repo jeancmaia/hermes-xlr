@@ -70,6 +70,55 @@ decoding), and (4) hide non-inference work behind decode.
 The whole surface is: a capability mapper, an `XLRTransport` over a pluggable engine-backend seam, a
 tuned per-backend engine config, and a measurement harness.
 
+## Pre-push checklist
+
+Before pushing or opening a PR, run the **exact same commands CI runs** — not the narrower Makefile
+targets:
+
+    uv run ruff check .          # NOT `ruff check src/` — CI lints everything
+    uv run ruff format --check .
+    uv run pytest
+
+Use **`/pr-ready`** (the project skill at `.claude/skills/pr-ready.md`) for a complete guardrail
+pass that mirrors CI plus runs project-specific static checks.
+
+## Project conventions
+
+These are conventions discovered through review. Follow them; they prevent recurring
+anti-patterns in this repo.
+
+### Optional dependency policy
+
+Any import guarded by `try/except ImportError` **must** still be declared in `pyproject.toml` under
+`[project.optional-dependencies]`, even if the code gracefully degrades without it. The pyproject.toml
+entry is the contract — it tells tooling, CI, and future maintainers that the dependency is intentional.
+
+### Safe external parsing
+
+Every `int()`, `float()`, or type conversion from external tool output (subprocess stdout, file reads,
+API responses, etc.) **must** live inside a `try/except (ValueError, TypeError)` block. Never assume an
+external tool produces well-formed output — corrupted or empty fields are common and must not crash the
+probe.
+
+### Mock-safe module design
+
+Module-level constants that gate behavior (feature flags, capability sentinels like
+`_HAS_NVML_CC`) must remain **dynamically re-evaluable** at test time. Prefer runtime `hasattr()`
+checks over import-time sentinels computed from optional imports. If you need a sentinel, expose it
+as a settable module attribute so `mock.patch.object` can override it in tests.
+
+### Data extraction pattern
+
+Static lookup tables larger than ~20 entries belong in a separate `_<name>.py` file, not in the
+main business-logic module. This keeps the logic file skimmable and the data independently testable
+and updatable without touching the probe code.
+
+### Docstring style
+
+No `spec.md` cross-references in docstrings. Use `HER-N` issue keys only when the cross-reference
+is essential for a future maintainer reading the code in isolation. Spec references drift out of
+date; Linear issue keys are traceable.
+
 ## Reference
 
 For anything about the `hermes-agent` framework itself — its loop, transport contract, prompt tiering,
