@@ -1,6 +1,6 @@
 # Model: Nemotron-Mini-4B-Instruct (Q4_K_M GGUF)
 
-**Chosen for:** S0.5 bring-up spike (HER-3)
+**Chosen for:** S0.5 bring-up spike
 
 ## Selection rationale
 
@@ -16,7 +16,7 @@
 | **License** | [NVIDIA Open Model License](https://developer.download.nvidia.com/licenses/nvidia-open-model-license-agreement-june-2024.pdf) — commercial use allowed |
 | **Why this model** | Reference model from the design spec (`spec.md` §1.4). Fits the ~2750 MB weight budget on a 6 GB GPU (~5 GB usable) with ~2 GB headroom for KV cache and activations. 32 layers, all GPU-resident with no offload. |
 
-## Expected VRAM budget (RTX 3050 6 GB Laptop)
+## Expected VRAM budget
 
 | Component | Size |
 |---|---|
