@@ -78,7 +78,7 @@ def test_reference_rtx_3050_emits_expected_plan():
     plan = planner.plan(host, catalog_ref=real_catalog)
 
     assert plan.objective is contracts.Objective.THROUGHPUT_FIRST
-    assert plan.model.repo == "nvidia/Nemotron-4B-Instruct"
+    assert plan.model.repo == "nvidia/Nemotron-Mini-4B-Instruct"
     assert plan.model.weight_quant is contracts.WeightQuant.INT4_AWQ
     assert plan.placement.cpu_offload_layers == 0
     assert plan.placement.gpu_layers == 32
@@ -102,7 +102,7 @@ def test_reference_rtx_3050_emits_expected_plan():
     rationale_text = "\n".join(plan.rationale)
     assert "INT8 KV" in rationale_text
     assert "int4_awq weights" in rationale_text
-    assert "Nemotron-4B-Instruct" in rationale_text
+    assert "Nemotron-Mini-4B-Instruct" in rationale_text
     assert "layers GPU-resident" in rationale_text
     assert "n-gram spec-decode" in rationale_text
     assert "native-Windows llama.cpp" in rationale_text

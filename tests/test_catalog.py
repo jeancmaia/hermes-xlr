@@ -1,7 +1,7 @@
 """Tests for the model catalog and budget-driven selection helpers (HER-9).
 
 Catalog: src/hermes_nim_xlr/mapper/catalog.py — entries grounded in spec.md
-§1.4's worked example (nvidia/Nemotron-4B-Instruct: 4.0B params, ~2200 MB,
+§1.4's worked example (nvidia/Nemotron-Mini-4B-Instruct: 4.0B params, ~2200 MB,
 32 layers, INT4_AWQ), plus a wider spread of local-friendly open-weight
 families (Phi, Mistral, Gemma) at 4-9B.
 """
@@ -19,7 +19,7 @@ QUANT = contracts.WeightQuant.INT4_AWQ
 
 def test_largest_fitting_picks_nemotron_at_its_own_footprint():
     model = catalog.largest_fitting(QUANT, budget_mb=2300)
-    assert model.repo == "nvidia/Nemotron-4B-Instruct"
+    assert model.repo == "nvidia/Nemotron-Mini-4B-Instruct"
 
 
 def test_largest_fitting_picks_largest_model_with_room():
@@ -57,7 +57,7 @@ def test_largest_fitting_raises_for_unrepresented_quant():
     "budget_mb,expected_repo",
     [
         (350, "Qwen/Qwen2.5-0.5B-Instruct"),
-        (2300, "nvidia/Nemotron-4B-Instruct"),
+        (2300, "nvidia/Nemotron-Mini-4B-Instruct"),
         (5000, "meta-llama/Llama-3.1-8B-Instruct"),
     ],
 )
@@ -91,7 +91,7 @@ def test_largest_fully_fitting_raises_when_nothing_is_fully_resident():
 
 def test_draft_for_picks_smallest_other_repo():
     nemotron = next(
-        m for m in catalog.CATALOG if m.repo == "nvidia/Nemotron-4B-Instruct"
+        m for m in catalog.CATALOG if m.repo == "nvidia/Nemotron-Mini-4B-Instruct"
     )
     draft_repo = catalog.draft_for(nemotron)
     assert draft_repo == "Qwen/Qwen2.5-0.5B-Instruct"

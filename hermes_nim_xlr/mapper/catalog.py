@@ -18,7 +18,7 @@ _MB = 1024 * 1024
 
 # A realistic spread of instruction-tuned models sized for the Windows +
 # NVIDIA local-fit range this project targets. The
-# nvidia/Nemotron-4B-Instruct footprint matches the reference worked example
+# nvidia/Nemotron-Mini-4B-Instruct footprint matches the reference worked example
 # (4.0B params, ~2200 MB, 32 layers, INT4_AWQ). Geometry fields
 # (kv_heads, head_dim, max_context_tokens) are required by the KV-cache
 # budget inversion that plan() performs (HER-12).
@@ -64,14 +64,14 @@ _CATALOG_INT4_AWQ: tuple[contracts.ModelChoice, ...] = (
         max_context_tokens=131072,
     ),
     contracts.ModelChoice(
-        repo="nvidia/Nemotron-4B-Instruct",
+        repo="nvidia/Nemotron-Mini-4B-Instruct",
         params_b=4.0,
         weight_quant=contracts.WeightQuant.INT4_AWQ,
         est_weight_mb=2200,
         n_layers=32,
         kv_heads=8,
         head_dim=128,
-        max_context_tokens=8192,
+        max_context_tokens=4096,
     ),
     contracts.ModelChoice(
         repo="mistralai/Mistral-7B-Instruct-v0.3",
@@ -159,14 +159,14 @@ _CATALOG_INT8: tuple[contracts.ModelChoice, ...] = (
         max_context_tokens=131072,
     ),
     contracts.ModelChoice(
-        repo="nvidia/Nemotron-4B-Instruct-INT8",
+        repo="nvidia/Nemotron-Mini-4B-Instruct-INT8",
         params_b=4.0,
         weight_quant=contracts.WeightQuant.INT8,
         est_weight_mb=4400,
         n_layers=32,
         kv_heads=8,
         head_dim=128,
-        max_context_tokens=8192,
+        max_context_tokens=4096,
     ),
     contracts.ModelChoice(
         repo="mistralai/Mistral-7B-Instruct-v0.3-INT8",
