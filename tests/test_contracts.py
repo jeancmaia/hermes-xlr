@@ -50,14 +50,14 @@ def _make_host() -> HostCapabilities:
 
 def _make_plan() -> ExecutionPlan:
     model = ModelChoice(
-        repo="nvidia/Nemotron-4B-Instruct",
+        repo="nvidia/Nemotron-Mini-4B-Instruct",
         params_b=4.0,
         weight_quant=WeightQuant.INT4_AWQ,
         est_weight_mb=2200,
         n_layers=32,
         kv_heads=8,
         head_dim=128,
-        max_context_tokens=8192,
+        max_context_tokens=4096,
     )
     placement = LayerPlacement(
         total_layers=32,
@@ -103,7 +103,7 @@ def test_host_capabilities_construction():
 
 def test_execution_plan_construction():
     plan = _make_plan()
-    assert plan.model.repo == "nvidia/Nemotron-4B-Instruct"
+    assert plan.model.repo == "nvidia/Nemotron-Mini-4B-Instruct"
     assert plan.kv.dtype is KvDtype.INT8
 
 
@@ -111,7 +111,7 @@ def test_execution_plan_round_trips_through_asdict():
     plan = _make_plan()
     as_dict = dataclasses.asdict(plan)
     assert as_dict["objective"] == Objective.THROUGHPUT_FIRST
-    assert as_dict["model"]["repo"] == "nvidia/Nemotron-4B-Instruct"
+    assert as_dict["model"]["repo"] == "nvidia/Nemotron-Mini-4B-Instruct"
     rebuilt = ExecutionPlan(
         objective=as_dict["objective"],
         model=ModelChoice(**as_dict["model"]),

@@ -126,7 +126,7 @@ def test_reference_profile_golden_plan():
     # reconstructed so the golden pins the planner's *selection* and all
     # derived geometry without duplicating catalog constants.
     nemotron = next(
-        m for m in real_catalog.CATALOG if m.repo == "nvidia/Nemotron-4B-Instruct"
+        m for m in real_catalog.CATALOG if m.repo == "nvidia/Nemotron-Mini-4B-Instruct"
     )
 
     expected = contracts.ExecutionPlan(
@@ -156,13 +156,13 @@ def test_reference_profile_golden_plan():
             bring_up=contracts.BringUp.NATIVE_WINDOWS,
             serve_endpoint="http://127.0.0.1:8080/v1",
         ),
-        target_ctx_tokens=8192,
-        est_vram_mb=3480,
+        target_ctx_tokens=4096,
+        est_vram_mb=3224,
         est_decode_tok_s=(29, 47),
         rationale=(
             "INT8 KV: ampere has no native FP8",
             "int4_awq weights for a ~4352 MB budget",
-            "nvidia/Nemotron-4B-Instruct (~2200 MB) leaves ~2152 MB for KV",
+            "nvidia/Nemotron-Mini-4B-Instruct (~2200 MB) leaves ~2152 MB for KV",
             "all 32 layers GPU-resident - no offload",
             "n-gram spec-decode: no VRAM for a draft model (zero-cost path)",
             "default native-Windows llama.cpp (CUDA, no WSL2) - "
