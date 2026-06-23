@@ -1,6 +1,6 @@
-# Engine Tuning Matrix — HER-16
+# Engine Tuning Matrix
 
-**Reference platform:** NVIDIA GeForce RTX 3050 6 GB Laptop (Ampere, CUDA 572.40)
+**Reference platform:**
 **Engine:** llama-server (CUDA build)
 **Model:** Llama-3.2-3B-Instruct Q4_K_M GGUF
 **Date:** 2026-06-23
