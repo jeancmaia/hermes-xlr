@@ -193,5 +193,48 @@ class LlamaCppBackend(EngineBackend):
     def _build_metadata(self) -> dict[str, str]:
         return {"commit": "unknown", "compile_flags": "unknown"}
 
-    def _cuda_info(self) -> dict[str, Any]:
-        return {"available": False, "device_count": 0}
+    @staticmethod
+    def _cuda_info() -> dict[str, Any]:
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,compute_cap,memory.total,driver_version",
+                    "--format=csv,noheader",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return {"available": False, "device_count": 0}
+            lines = [
+                line.strip()
+                for line in result.stdout.strip().split("\n")
+                if line.strip()
+            ]
+            devices = []
+            for line in lines:
+                parts = [p.strip() for p in line.split(", ")]
+                if len(parts) >= 4:
+                    try:
+                        memory_total = int(parts[2].replace(" MiB", ""))
+                    except (ValueError, TypeError):
+                        memory_total = 0
+                    devices.append(
+                        {
+                            "name": parts[0],
+                            "compute_cap": parts[1],
+                            "memory_total_mib": memory_total,
+                            "driver_version": parts[3],
+                        }
+                    )
+            return {
+                "available": len(devices) > 0,
+                "device_count": len(devices),
+                "devices": devices,
+            }
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return {"available": False, "device_count": 0}
