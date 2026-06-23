@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -106,13 +107,14 @@ class LlamaCppBackend(EngineBackend):
         self._assert_version_match()
 
         cmd = self._build_command()
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-            text=True,
-        )
+        kwargs: dict[str, object] = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        self._process = subprocess.Popen(cmd, **kwargs)
 
         if not self._wait_until_healthy():
             self._cleanup_process()
