@@ -9,7 +9,9 @@ description = "Windows + NVIDIA optimization-first agent runtime accelerating th
 requires-python = ">=3.11"
 # No runtime third-party dependencies yet. When one is added, it must be
 # exact-pinned (no floating ranges) per AGENTS.md supply-chain policy.
-dependencies = []
+dependencies = [
+    "hermes-agent==0.17.0",
+]
 
 [project.optional-dependencies]
 # Build-time / offline tooling only -- never installed in the serving path.
