@@ -63,11 +63,13 @@ _CATALOG_INT4_AWQ: tuple[contracts.ModelChoice, ...] = (
         head_dim=96,
         max_context_tokens=131072,
     ),
+    # S0.5-verified (HER-17): real measured peak VRAM 3179 MiB on RTX 3050 6GB;
+    # weight-only footprint ~2155 MiB (peak - 768 margin - 256 KV slot).
     contracts.ModelChoice(
         repo="nvidia/Nemotron-Mini-4B-Instruct",
         params_b=4.0,
         weight_quant=contracts.WeightQuant.INT4_AWQ,
-        est_weight_mb=2200,
+        est_weight_mb=2155,
         n_layers=32,
         kv_heads=8,
         head_dim=128,

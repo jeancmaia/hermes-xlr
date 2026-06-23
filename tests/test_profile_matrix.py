@@ -143,7 +143,7 @@ def test_reference_profile_golden_plan():
         kv=contracts.KvCacheConfig(
             dtype=contracts.KvDtype.INT8,
             enable_block_reuse=True,
-            free_gpu_memory_fraction=0.49,
+            free_gpu_memory_fraction=0.5,
             host_cache_size_bytes=0,
         ),
         levers=contracts.DecodeLevers(
@@ -157,12 +157,12 @@ def test_reference_profile_golden_plan():
             serve_endpoint="http://127.0.0.1:8080/v1",
         ),
         target_ctx_tokens=4096,
-        est_vram_mb=3224,
-        est_decode_tok_s=(29, 47),
+        est_vram_mb=3179,
+        est_decode_tok_s=(30, 48),
         rationale=(
             "INT8 KV: ampere has no native FP8",
             "int4_awq weights for a ~4352 MB budget",
-            "nvidia/Nemotron-Mini-4B-Instruct (~2200 MB) leaves ~2152 MB for KV",
+            "nvidia/Nemotron-Mini-4B-Instruct (~2155 MB) leaves ~2197 MB for KV",
             "all 32 layers GPU-resident - no offload",
             "n-gram spec-decode: no VRAM for a draft model (zero-cost path)",
             "default native-Windows llama.cpp (CUDA, no WSL2) - "
