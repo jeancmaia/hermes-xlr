@@ -41,6 +41,17 @@ class LlamaCppBackend(EngineBackend):
     n_gpu_layers:
         Number of layers to offload to the GPU. ``-1`` (default) means all
         layers — a fully GPU-resident model.
+    ctx_size:
+        Maximum context length (tokens). Controls KV-cache pre-allocation
+        and must match the planner's ``target_ctx_tokens`` to avoid wasting
+        VRAM. Default 4096.
+    cuda_graphs:
+        Enable CUDA graphs for repetitive launch sequences (server CLI
+        ``--cuda-graphs``). Requires a compatible GPU and driver.
+    speculative_ngram:
+        Look-ahead depth for n-gram speculative decoding (server CLI
+        ``--speculative-ngram N``). ``None`` (default) disables it at the
+        server level; set to e.g. ``32`` for the zero-cost spec-decode path.
     engine_version:
         Version string of the engine build (for the release gate).
     checkpoint_toolchain_version:
@@ -62,6 +73,9 @@ class LlamaCppBackend(EngineBackend):
         host: str = _DEFAULT_HOST,
         port: int = _DEFAULT_PORT,
         n_gpu_layers: int = -1,
+        ctx_size: int = 4096,
+        cuda_graphs: bool = False,
+        speculative_ngram: int | None = None,
         engine_version: str = "",
         checkpoint_toolchain_version: str = "",
         extra_args: tuple[str, ...] = (),
@@ -73,6 +87,9 @@ class LlamaCppBackend(EngineBackend):
         self._host = host
         self._port = port
         self._n_gpu_layers = n_gpu_layers
+        self._ctx_size = ctx_size
+        self._cuda_graphs = cuda_graphs
+        self._speculative_ngram = speculative_ngram
         self._engine_version = engine_version
         self._checkpoint_toolchain_version = checkpoint_toolchain_version
         self._extra_args = extra_args
@@ -161,7 +178,7 @@ class LlamaCppBackend(EngineBackend):
             )
 
     def _build_command(self) -> list[str]:
-        return [
+        cmd = [
             self._binary_path,
             "--host",
             self._host,
@@ -171,8 +188,16 @@ class LlamaCppBackend(EngineBackend):
             self._model_path,
             "--n-gpu-layers",
             str(self._n_gpu_layers),
-            *list(self._extra_args),
+            "--ctx-size",
+            str(self._ctx_size),
         ]
+        if self._cuda_graphs:
+            cmd.append("--cuda-graphs")
+        if self._speculative_ngram is not None:
+            cmd.append("--speculative-ngram")
+            cmd.append(str(self._speculative_ngram))
+        cmd.extend(self._extra_args)
+        return cmd
 
     def _wait_until_healthy(self) -> bool:
         deadline = time.monotonic() + self._start_timeout

@@ -138,7 +138,15 @@ def test_start_stops_cleanly():
 
         mock_popen.assert_called_once()
         args, _ = mock_popen.call_args
+
+        # Verify base command structure
         assert _FAKE_BINARY in args[0]
+        assert "--model" in args[0]
+        assert _FAKE_MODEL in args[0]
+        assert "--n-gpu-layers" in args[0]
+        assert "-1" in args[0]
+        assert "--ctx-size" in args[0]
+        assert "4096" in args[0]
 
         assert mock_health.call_count >= 1
 
@@ -148,6 +156,131 @@ def test_start_stops_cleanly():
 
         proc.terminate.assert_called_once()
         proc.wait.assert_called()
+
+
+# ===========================================================================
+# LlamaCppBackend — engine tuning CLI flags (HER-16)
+# ===========================================================================
+
+
+def _extract_spawned_command(backend: LlamaCppBackend) -> list[str]:
+    """Start a backend and return the spawned command args."""
+    with (
+        mock.patch("os.path.isfile", return_value=True),
+        mock.patch("subprocess.Popen") as mock_popen,
+        mock.patch(
+            "urllib.request.urlopen",
+            return_value=_mock_healthy_response(),
+        ),
+    ):
+        proc = mock.MagicMock()
+        mock_popen.return_value = proc
+        backend.start()
+        backend.stop()
+        (_args,), _ = mock_popen.call_args
+        return _args  # the list of CLI args
+
+
+def test_default_cli_args():
+    """Default constructor emits ctx-size=4096 and no tuning flags."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--ctx-size" in cmd
+    assert cmd[cmd.index("--ctx-size") + 1] == "4096"
+    assert "--cuda-graphs" not in cmd
+    assert "--speculative-ngram" not in cmd
+
+
+def test_cuda_graphs_flag():
+    """cuda_graphs=True emits --cuda-graphs CLI flag."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        cuda_graphs=True,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--cuda-graphs" in cmd
+
+
+def test_cuda_graphs_omitted_when_false():
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        cuda_graphs=False,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--cuda-graphs" not in cmd
+
+
+def test_speculative_ngram_flag():
+    """speculative_ngram=N emits --speculative-ngram N CLI flag."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        speculative_ngram=32,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    idx = cmd.index("--speculative-ngram")
+    assert cmd[idx + 1] == "32"
+
+
+def test_speculative_ngram_omitted_when_none():
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        speculative_ngram=None,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--speculative-ngram" not in cmd
+
+
+def test_ctx_size_override():
+    """Custom ctx_size emits --ctx-size with the custom value."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        ctx_size=8192,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    idx = cmd.index("--ctx-size")
+    assert cmd[idx + 1] == "8192"
+
+
+def test_tuning_flags_compose_with_extra_args():
+    """Tuning flags and extra_args merge correctly in the command."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        cuda_graphs=True,
+        speculative_ngram=48,
+        ctx_size=2048,
+        extra_args=("--no-kv-offload", "--mlock"),
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--cuda-graphs" in cmd
+    idx = cmd.index("--speculative-ngram")
+    assert cmd[idx + 1] == "48"
+    idx2 = cmd.index("--ctx-size")
+    assert cmd[idx2 + 1] == "2048"
+    assert "--no-kv-offload" in cmd
+    assert "--mlock" in cmd
 
 
 def test_binary_not_found_raises():
