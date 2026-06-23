@@ -41,3 +41,4 @@ After download, confirm the model loads with `llama-cli`:
 ```powershell
 llama-cli --model models\nemotron-mini-4b-instruct-q4_k_m.gguf -p "Hello" -n 10
 ```
+

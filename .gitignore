@@ -29,3 +29,15 @@ opencode.json
 .DS_Store
 Thumbs.db
 
+# Binary engine artifacts
+bin/
+
+# Model weights (download separately)
+models/*.gguf
+
+# Runtime logs
+*.log
+server-*.log
+cuda-*.log
+llama*-*.log
+
