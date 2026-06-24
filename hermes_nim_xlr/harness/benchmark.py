@@ -82,7 +82,7 @@ def _probe_vram_mib() -> int:
             [
                 "nvidia-smi",
                 "--query-gpu=memory.used",
-                "--format=csv,noheader,nocpu",
+                "--format=csv,noheader",
             ],
             capture_output=True,
             text=True,

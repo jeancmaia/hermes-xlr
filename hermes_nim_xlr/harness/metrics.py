@@ -7,7 +7,7 @@ collected by the harness — no fake or synthetic numbers.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -122,9 +122,28 @@ class BenchmarkReport:
     @classmethod
     def from_json(cls, raw: str) -> BenchmarkReport:
         data = json.loads(raw)
-        plan = ExecutionPlan(**data["plan"])
+        plan = _reconstruct_dataclass(ExecutionPlan, data["plan"])
         turns = [TurnMetrics(**t) for t in data.get("turns", [])]
         return cls(plan=plan, turns=turns)
+
+
+def _reconstruct_dataclass(cls: type, data: dict) -> Any:
+    """Recursively reconstruct a frozen dataclass from ``asdict()`` output.``"""
+    kwargs: dict[str, Any] = {}
+    for f in fields(cls):
+        raw_val = data.get(f.name)
+        t = f.type
+        origin = getattr(t, "__origin__", None)
+        args = getattr(t, "__args__", ())
+        if is_dataclass(t):
+            kwargs[f.name] = _reconstruct_dataclass(t, raw_val)
+        elif isinstance(t, type) and issubclass(t, Enum):
+            kwargs[f.name] = t(raw_val)
+        elif origin is tuple and args:
+            kwargs[f.name] = tuple(raw_val)
+        else:
+            kwargs[f.name] = raw_val
+    return cls(**kwargs)
 
 
 def compute_ab_delta(
