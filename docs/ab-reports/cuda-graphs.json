@@ -1,0 +1,122 @@
+{
+  "plan": {
+    "objective": "throughput_first",
+    "model": {
+      "repo": "Qwen/Qwen2.5-1.5B-Instruct",
+      "params_b": 1.5,
+      "weight_quant": "int4_awq",
+      "est_weight_mb": 900,
+      "n_layers": 28,
+      "kv_heads": 2,
+      "head_dim": 128,
+      "max_context_tokens": 32768
+    },
+    "placement": {
+      "total_layers": 28,
+      "gpu_layers": 28,
+      "cpu_offload_layers": 0,
+      "tensor_parallel": 1,
+      "pipeline_parallel": 1,
+      "note": "fully GPU-resident"
+    },
+    "kv": {
+      "dtype": "int8",
+      "enable_block_reuse": true,
+      "free_gpu_memory_fraction": 0.67,
+      "host_cache_size_bytes": 0,
+      "cache_type_k": "f16",
+      "cache_type_v": "f16"
+    },
+    "levers": {
+      "cuda_graphs": true,
+      "spec_decode": "none",
+      "draft_model": null
+    },
+    "backend": {
+      "kind": "llama_cpp",
+      "bring_up": "native_windows",
+      "serve_endpoint": "http://127.0.0.1:8080/v1"
+    },
+    "target_ctx_tokens": 32768,
+    "est_vram_mb": 2116,
+    "est_decode_tok_s": [
+      72,
+      117
+    ],
+    "rationale": [
+      "INT8 KV: ampere has no native FP8",
+      "int4_awq weights for a ~2696 MB budget",
+      "Qwen/Qwen2.5-1.5B-Instruct (~900 MB) leaves ~1796 MB for KV",
+      "all 28 layers GPU-resident - no offload",
+      "draft-target spec-decode: Qwen/Qwen2.5-0.5B-Instruct fits the spare budget",
+      "default native-Windows llama.cpp (CUDA, no WSL2) - the Windows-tuned local backend"
+    ],
+    "warnings": [
+      "shared display GPU - expect eviction; enable prefill warming"
+    ]
+  },
+  "turns": [
+    {
+      "turn": 0,
+      "ttft_ms": 563.0,
+      "tokens": 24,
+      "tok_s": 42.6,
+      "tool_calls": 1,
+      "peak_vram_mb": 2539,
+      "cached": false
+    },
+    {
+      "turn": 1,
+      "ttft_ms": 4797.0,
+      "tokens": 256,
+      "tok_s": 53.4,
+      "tool_calls": 0,
+      "peak_vram_mb": 2539,
+      "cached": true
+    },
+    {
+      "turn": 2,
+      "ttft_ms": 703.0,
+      "tokens": 26,
+      "tok_s": 37.0,
+      "tool_calls": 1,
+      "peak_vram_mb": 2539,
+      "cached": true
+    },
+    {
+      "turn": 3,
+      "ttft_ms": 4687.0,
+      "tokens": 243,
+      "tok_s": 51.8,
+      "tool_calls": 0,
+      "peak_vram_mb": 2539,
+      "cached": true
+    },
+    {
+      "turn": 4,
+      "ttft_ms": 704.0,
+      "tokens": 24,
+      "tok_s": 34.1,
+      "tool_calls": 1,
+      "peak_vram_mb": 2539,
+      "cached": true
+    }
+  ],
+  "summary": {
+    "avg_ttft_first_ms": 563.0,
+    "avg_ttft_cached_ms": 2722.75,
+    "steady_state_tok_s": 44.074999999999996,
+    "spec_acceptance_rate": 0.0,
+    "peak_vram_mb": 2539,
+    "end_to_end_ms": 11454.0,
+    "config": {
+      "cuda_graphs": true,
+      "spec_decode": "none",
+      "draft_model": null,
+      "kv_block_reuse": true,
+      "kv_dtype": "int8",
+      "ctx_size": 32768
+    },
+    "timestamp": "2026-06-24T16:09:28.163156+00:00"
+  }
+}
