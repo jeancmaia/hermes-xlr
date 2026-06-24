@@ -655,6 +655,8 @@ def test_no_extra_body_entropy(transport: XLRTransport):
         "speculative",
         "n_gpu_layers",
         "n_ctx",
+        "cache_type_k",
+        "cache_type_v",
     }
     assert set(extra.keys()).issubset(allowed_keys), (
         f"Unexpected keys in extra_body: {set(extra.keys()) - allowed_keys}"

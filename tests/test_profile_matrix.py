@@ -142,6 +142,8 @@ def test_reference_profile_golden_plan():
         ),
         kv=contracts.KvCacheConfig(
             dtype=contracts.KvDtype.INT8,
+            cache_type_k="q8_0",
+            cache_type_v="q8_0",
             enable_block_reuse=True,
             free_gpu_memory_fraction=0.5,
             host_cache_size_bytes=0,

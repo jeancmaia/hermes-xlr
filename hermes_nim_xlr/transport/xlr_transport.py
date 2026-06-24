@@ -152,6 +152,11 @@ class XLRTransport(ProviderTransport):
 
         extra_body["n_ctx"] = self._plan.target_ctx_tokens
 
+        if self._plan.kv.cache_type_k:
+            extra_body["cache_type_k"] = self._plan.kv.cache_type_k
+        if self._plan.kv.cache_type_v:
+            extra_body["cache_type_v"] = self._plan.kv.cache_type_v
+
         if extra_body:
             kwargs["extra_body"] = extra_body
 

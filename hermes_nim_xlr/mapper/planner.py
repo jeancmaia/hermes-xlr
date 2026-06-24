@@ -286,12 +286,21 @@ def plan(
 
     kv_fraction = round(kv_budget / usable_total, 2) if usable_total else 0.0
 
+    if objective is contracts.Objective.QUALITY_FIRST:
+        cache_type_k = cache_type_v = "f16"
+    elif primary_gpu.supports_int8:
+        cache_type_k = cache_type_v = "q8_0"
+    else:
+        cache_type_k = cache_type_v = "f16"
+
     return contracts.ExecutionPlan(
         objective=objective,
         model=model,
         placement=placement,
         kv=contracts.KvCacheConfig(
             dtype=kv_dtype,
+            cache_type_k=cache_type_k,
+            cache_type_v=cache_type_v,
             enable_block_reuse=True,
             free_gpu_memory_fraction=kv_fraction,
             host_cache_size_bytes=0,
