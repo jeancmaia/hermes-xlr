@@ -99,6 +99,8 @@ class KvCacheConfig:  # maps to TensorRT-LLM KVCacheConfig real field names
     enable_block_reuse: bool
     free_gpu_memory_fraction: float
     host_cache_size_bytes: int
+    cache_type_k: str = "f16"
+    cache_type_v: str = "f16"
 
 
 @dataclass(frozen=True)
