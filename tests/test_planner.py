@@ -85,6 +85,8 @@ def test_reference_rtx_3050_emits_expected_plan():
     assert plan.placement.tensor_parallel == 1
 
     assert plan.kv.dtype is contracts.KvDtype.INT8
+    assert plan.kv.cache_type_k == "q8_0"
+    assert plan.kv.cache_type_v == "q8_0"
     assert plan.kv.enable_block_reuse is True
     assert plan.kv.host_cache_size_bytes == 0
 
@@ -130,6 +132,8 @@ def test_ada_desktop_prefers_fp8_and_draft_target():
     plan = planner.plan(host, catalog_ref=real_catalog)
 
     assert plan.kv.dtype is contracts.KvDtype.FP8
+    assert plan.kv.cache_type_k == "q8_0"
+    assert plan.kv.cache_type_v == "q8_0"
     assert plan.model.weight_quant is contracts.WeightQuant.INT8
     assert plan.levers.spec_decode is contracts.SpecDecode.DRAFT_TARGET
     assert plan.levers.draft_model is not None
@@ -217,6 +221,8 @@ def test_quality_first_can_accept_cpu_offload():
 
     assert plan.objective is contracts.Objective.QUALITY_FIRST
     assert plan.placement.cpu_offload_layers > 0
+    assert plan.kv.cache_type_k == "f16"
+    assert plan.kv.cache_type_v == "f16"
     assert any("layers on CPU" in w for w in plan.warnings)
 
 

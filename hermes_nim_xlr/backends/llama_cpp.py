@@ -78,6 +78,8 @@ class LlamaCppBackend(EngineBackend):
         speculative_ngram: int | None = None,
         engine_version: str = "",
         checkpoint_toolchain_version: str = "",
+        kv_cache_type_k: str = "f16",
+        kv_cache_type_v: str = "f16",
         extra_args: tuple[str, ...] = (),
         start_timeout: float = _START_TIMEOUT,
         poll_interval: float = _POLL_INTERVAL,
@@ -93,6 +95,8 @@ class LlamaCppBackend(EngineBackend):
         self._engine_version = engine_version
         self._checkpoint_toolchain_version = checkpoint_toolchain_version
         self._extra_args = extra_args
+        self._kv_cache_type_k = kv_cache_type_k
+        self._kv_cache_type_v = kv_cache_type_v
         self._start_timeout = start_timeout
         self._poll_interval = poll_interval
 
@@ -196,6 +200,12 @@ class LlamaCppBackend(EngineBackend):
         if self._speculative_ngram is not None:
             cmd.append("--speculative-ngram")
             cmd.append(str(self._speculative_ngram))
+        if self._kv_cache_type_k not in (None, "f16"):
+            cmd.append("--cache-type-k")
+            cmd.append(self._kv_cache_type_k)
+        if self._kv_cache_type_v not in (None, "f16"):
+            cmd.append("--cache-type-v")
+            cmd.append(self._kv_cache_type_v)
         cmd.extend(self._extra_args)
         return cmd
 

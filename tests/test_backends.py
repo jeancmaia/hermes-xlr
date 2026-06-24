@@ -283,6 +283,64 @@ def test_tuning_flags_compose_with_extra_args():
     assert "--mlock" in cmd
 
 
+def test_kv_cache_type_k_flag():
+    """kv_cache_type_k emits --cache-type-k CLI flag."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        kv_cache_type_k="q8_0",
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    idx = cmd.index("--cache-type-k")
+    assert cmd[idx + 1] == "q8_0"
+
+
+def test_kv_cache_type_v_flag():
+    """kv_cache_type_v emits --cache-type-v CLI flag."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        kv_cache_type_v="q8_0",
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    idx = cmd.index("--cache-type-v")
+    assert cmd[idx + 1] == "q8_0"
+
+
+def test_kv_cache_type_omitted_when_f16():
+    """Default f16 emits no --cache-type-k/v (engine default)."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--cache-type-k" not in cmd
+    assert "--cache-type-v" not in cmd
+
+
+def test_kv_cache_type_custom_values():
+    """Different k/v types emit correctly."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        kv_cache_type_k="q4_0",
+        kv_cache_type_v="q8_0",
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    idx_k = cmd.index("--cache-type-k")
+    assert cmd[idx_k + 1] == "q4_0"
+    idx_v = cmd.index("--cache-type-v")
+    assert cmd[idx_v + 1] == "q8_0"
+
+
 def test_binary_not_found_raises():
     backend = LlamaCppBackend(
         binary_path="C:\\nonexistent\\llama-server.exe",
