@@ -157,7 +157,7 @@ def test_probe_gpu_pynvml_nvml_init_fails():
 def test_probe_gpu_smi_parses_csv():
     """Simulate nvidia-smi CSV output for a single RTX 3050."""
     stdout = (
-        "0, NVIDIA GeForce RTX 3050 6GB Laptop GPU, 6144 MiB, 5120 MiB, 8, 6, 555.99\n"
+        "0, NVIDIA GeForce RTX 3050 6GB Laptop GPU, 6144 MiB, 5120 MiB, 8.6, 555.99\n"
     )
     with mock.patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
@@ -177,8 +177,8 @@ def test_probe_gpu_smi_parses_csv():
 def test_probe_gpu_smi_multiple():
     """Two GPUs are parsed as separate entries."""
     stdout = (
-        "0, NVIDIA A100-SXM4-80GB, 81920 MiB, 76800 MiB, 8, 0, 550.54\n"
-        "1, NVIDIA A100-SXM4-80GB, 81920 MiB, 76800 MiB, 8, 0, 550.54\n"
+        "0, NVIDIA A100-SXM4-80GB, 81920 MiB, 76800 MiB, 8.0, 550.54\n"
+        "1, NVIDIA A100-SXM4-80GB, 81920 MiB, 76800 MiB, 8.0, 550.54\n"
     )
     with mock.patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
@@ -333,6 +333,8 @@ def test_detect_container_runtime_none(mock_which):
 # ===========================================================================
 
 
+@mock.patch.object(detect, "_probe_gpu_pynvml")
+@mock.patch.object(detect, "_probe_gpu_smi")
 @mock.patch.object(detect, "_detect_container_runtime")
 @mock.patch.object(detect, "_get_cpu_ram_gb")
 @mock.patch.object(detect, "_detect_os_and_wsl")
@@ -340,11 +342,15 @@ def test_detect_no_gpu(
     mock_os_wsl,
     mock_ram,
     mock_ctr,
+    mock_smi,
+    mock_pynvml,
 ):
     """detect() returns a HostCapabilities with no GPUs when none are found."""
     mock_os_wsl.return_value = ("Linux", False)
     mock_ram.return_value = 32.0
     mock_ctr.return_value = ("docker", True)
+    mock_smi.return_value = None
+    mock_pynvml.return_value = None
 
     host = detect.detect()
 

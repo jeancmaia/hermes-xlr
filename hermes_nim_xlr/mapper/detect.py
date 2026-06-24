@@ -60,8 +60,7 @@ def _smi_query(fields: list[str]) -> list[dict[str, str]] | None:
     """Run ``nvidia-smi --query-gpu=...`` and parse CSV per-GPU rows.
 
     The ``fields`` parameter must be ordered as:
-    [index, name, memory.total, memory.free, compute_cap_major,
-    compute_cap_minor, driver_version]
+    [index, name, memory.total, memory.free, compute_cap, driver_version]
     """
     csv_fields = ",".join(fields)
     try:
@@ -69,7 +68,7 @@ def _smi_query(fields: list[str]) -> list[dict[str, str]] | None:
             [
                 "nvidia-smi",
                 f"--query-gpu={csv_fields}",
-                "--format=csv,noheader,nocpu",
+                "--format=csv,noheader",
             ],
             capture_output=True,
             text=True,
@@ -83,17 +82,21 @@ def _smi_query(fields: list[str]) -> list[dict[str, str]] | None:
     gpus: list[dict[str, str]] = []
     for line in result.stdout.strip().splitlines():
         parts = [c.strip() for c in line.split(",")]
-        if len(parts) >= 6:
+        if len(parts) >= 5:
+            try:
+                cc_major, cc_minor = parts[4].split(".", 1)
+            except (ValueError, TypeError, IndexError):
+                cc_major, cc_minor = "0", "0"
             gpu_data: dict[str, str] = {
                 "index": parts[0],
                 "name": parts[1],
                 "memory.total": parts[2].replace(" MiB", ""),
                 "memory.free": parts[3].replace(" MiB", ""),
-                "compute_cap_major": parts[4],
-                "compute_cap_minor": parts[5],
+                "compute_cap_major": cc_major,
+                "compute_cap_minor": cc_minor,
             }
-            if len(parts) > 6:
-                gpu_data["driver_version"] = parts[6]
+            if len(parts) > 5:
+                gpu_data["driver_version"] = parts[5]
             gpus.append(gpu_data)
     return gpus if gpus else None
 
@@ -165,8 +168,7 @@ def _probe_gpu_smi() -> list[dict] | None:
             "name",
             "memory.total",
             "memory.free",
-            "compute_cap_major",
-            "compute_cap_minor",
+            "compute_cap",
             "driver_version",
         ]
     )
