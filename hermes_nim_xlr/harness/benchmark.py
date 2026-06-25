@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 from hermes_nim_xlr.contracts import ExecutionPlan
@@ -25,6 +26,56 @@ from hermes_nim_xlr.harness.metrics import (
     compute_ab_delta,
 )
 from hermes_nim_xlr.transport import XLRTransport
+
+
+def _dict_to_response(raw: dict[str, Any]) -> SimpleNamespace:
+    """Convert a raw HTTP JSON response dict to a mock object compatible
+    with ``normalize_response``.
+
+    Constructs a ``SimpleNamespace`` tree that mirrors the OpenAI
+    ChatCompletion object structure, allowing the harness to use the
+    transport's ``normalize_response`` for side effects (e.g. async
+    persistence) without a real engine.
+    """
+    choices_raw = raw.get("choices", [{}])
+    first = choices_raw[0] if choices_raw else {}
+    msg_raw = first.get("message", {}) or {}
+
+    usage_raw = raw.get("usage")
+    usage = None
+    if usage_raw:
+        usage = SimpleNamespace(
+            prompt_tokens=usage_raw.get("prompt_tokens", 0),
+            completion_tokens=usage_raw.get("completion_tokens", 0),
+            total_tokens=usage_raw.get("total_tokens", 0),
+        )
+
+    tc_raw = msg_raw.get("tool_calls")
+    tool_calls = None
+    if tc_raw:
+        tool_calls = []
+        for tc in tc_raw:
+            fn = SimpleNamespace(
+                name=tc.get("function", {}).get("name", ""),
+                arguments=tc.get("function", {}).get("arguments", "{}"),
+            )
+            tool_calls.append(SimpleNamespace(id=tc.get("id"), function=fn))
+
+    msg = SimpleNamespace(
+        content=msg_raw.get("content"),
+        tool_calls=tool_calls,
+    )
+
+    choice = SimpleNamespace(
+        message=msg,
+        finish_reason=first.get("finish_reason", "stop"),
+    )
+
+    return SimpleNamespace(
+        choices=[choice],
+        usage=usage,
+    )
+
 
 _SAMPLE_TOOLS: list[dict[str, Any]] = [
     {
@@ -106,6 +157,7 @@ class BenchmarkHarness:
         plan: ExecutionPlan,
         endpoint_url: str | None = None,
         overrides: dict | None = None,
+        persist_dir: str | None = None,
     ) -> None:
         self._plan = plan
         self._endpoint_url = (endpoint_url or plan.backend.serve_endpoint).rstrip("/")
@@ -113,6 +165,7 @@ class BenchmarkHarness:
         self._transport = XLRTransport(
             execution_plan=plan,
             endpoint_url=self._endpoint_url,
+            persist_dir=persist_dir,
         )
 
     def _chat_endpoint(self) -> str:
@@ -222,6 +275,9 @@ class BenchmarkHarness:
                     "content": '{"result": "ok"}',
                 }
             )
+
+        # Fire async persistence: simulate the agent's normalize_response call
+        self._transport.normalize_response(_dict_to_response(raw))
 
         return metrics, messages
 

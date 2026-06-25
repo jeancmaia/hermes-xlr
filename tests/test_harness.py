@@ -11,7 +11,9 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import time
 import urllib.error
 from dataclasses import replace
 from unittest import mock
@@ -570,3 +572,60 @@ def test_vram_probe_safe_parse_garbage():
 
     with mock.patch("subprocess.run", return_value=mock_result):
         assert _probe_vram_mib() == 0
+
+
+# ===========================================================================
+# Multi-turn async persistence (HER-24)
+# ===========================================================================
+
+
+def test_multi_turn_async_persistence(sample_plan: ExecutionPlan):
+    """Files are written for each turn and the harness doesn't block on persistence."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        harness = BenchmarkHarness(
+            plan=sample_plan,
+            endpoint_url="http://127.0.0.1:9999/v1",
+            persist_dir=tmpdir,
+        )
+
+        response_data = _mock_chat_response(
+            content="Turn response.",
+            finish_reason="stop",
+            completion_tokens=10,
+            prompt_tokens=50,
+        )
+
+        with (
+            mock.patch(
+                "urllib.request.urlopen",
+                return_value=_mock_urlopen(response_data),
+            ),
+            mock.patch(
+                "hermes_nim_xlr.harness.benchmark._probe_vram_mib",
+                return_value=3000,
+            ),
+            mock.patch(
+                "time.monotonic",
+                side_effect=[0.0, 0.5, 0.0, 0.5, 0.0, 0.5],
+            ),
+        ):
+            report = harness.run(turns=3)
+
+        assert len(report.turns) == 3
+
+        entries = []
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            entries = sorted(f for f in os.listdir(tmpdir) if f.endswith(".json"))
+            if len(entries) >= 3:
+                break
+            time.sleep(0.01)
+
+        assert len(entries) == 3, (
+            f"Expected 3 persisted files, found {len(entries)}: {entries}"
+        )
+        for filename in entries:
+            assert filename.startswith("turn_")
+            assert filename.endswith(".json")
