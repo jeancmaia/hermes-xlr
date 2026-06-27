@@ -123,16 +123,16 @@ class XLRTransport(ProviderTransport):
             "messages": sanitized,
         }
 
+        # extra_body carries engine-specific parameters from the plan.
+        # These are static per ExecutionPlan — they never change turn-to-turn.
+        extra_body: dict[str, Any] = {}
+
         if tools:
             kwargs["tools"] = tools
 
         max_tokens = params.get("max_tokens")
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
-
-        # extra_body carries engine-specific parameters from the plan.
-        # These are static per ExecutionPlan — they never change turn-to-turn.
-        extra_body: dict[str, Any] = {}
 
         extra_body["cache_prompt"] = self._plan.kv.enable_block_reuse
         extra_body["kv_cache_free_gpu_mem_fraction"] = (

@@ -52,6 +52,9 @@ class LlamaCppBackend(EngineBackend):
         Look-ahead depth for n-gram speculative decoding (server CLI
         ``--speculative-ngram N``). ``None`` (default) disables it at the
         server level; set to e.g. ``32`` for the zero-cost spec-decode path.
+    grammar_file:
+        Path to a GBNF grammar file for constrained decoding (server CLI
+        ``--grammar-file``). ``None`` (default) means no grammar constraint.
     engine_version:
         Version string of the engine build (for the release gate).
     checkpoint_toolchain_version:
@@ -76,6 +79,7 @@ class LlamaCppBackend(EngineBackend):
         ctx_size: int = 4096,
         cuda_graphs: bool = False,
         speculative_ngram: int | None = None,
+        grammar_file: str | None = None,
         engine_version: str = "",
         checkpoint_toolchain_version: str = "",
         kv_cache_type_k: str = "f16",
@@ -92,6 +96,7 @@ class LlamaCppBackend(EngineBackend):
         self._ctx_size = ctx_size
         self._cuda_graphs = cuda_graphs
         self._speculative_ngram = speculative_ngram
+        self._grammar_file = grammar_file
         self._engine_version = engine_version
         self._checkpoint_toolchain_version = checkpoint_toolchain_version
         self._extra_args = extra_args
@@ -206,6 +211,9 @@ class LlamaCppBackend(EngineBackend):
         if self._kv_cache_type_v not in (None, "f16"):
             cmd.append("--cache-type-v")
             cmd.append(self._kv_cache_type_v)
+        if self._grammar_file is not None:
+            cmd.append("--grammar-file")
+            cmd.append(self._grammar_file)
         cmd.extend(self._extra_args)
         return cmd
 
