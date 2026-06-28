@@ -12,7 +12,9 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from typing import Any
 from unittest import mock
 
@@ -703,3 +705,81 @@ def test_endpoint_url_strips_trailing_slash():
         endpoint_url="http://127.0.0.1:8080/v1/",
     )
     assert t._endpoint_url == "http://127.0.0.1:8080/v1"
+
+
+# ===========================================================================
+# Async persistence (HER-24)
+# ===========================================================================
+
+
+def test_async_persistence_does_not_block(execution_plan: ExecutionPlan):
+    """The background write must not block ``normalize_response``."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        t = XLRTransport(
+            execution_plan=execution_plan,
+            endpoint_url=execution_plan.backend.serve_endpoint,
+            persist_dir=tmpdir,
+        )
+        response = _make_chat_completion(content="Hello", finish_reason="stop")
+
+        start = time.monotonic()
+        result = t.normalize_response(response)
+        elapsed = time.monotonic() - start
+
+        assert isinstance(result, NormalizedResponse)
+        assert result.content == "Hello"
+        assert elapsed < 0.05, (
+            f"normalize_response took {elapsed * 1000:.1f}ms — "
+            "expected < 50ms with background persistence"
+        )
+        time.sleep(0.1)
+
+
+def test_async_persistence_writes_file(execution_plan: ExecutionPlan):
+    """A JSON file appears in ``persist_dir`` after ``normalize_response``."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        t = XLRTransport(
+            execution_plan=execution_plan,
+            endpoint_url=execution_plan.backend.serve_endpoint,
+            persist_dir=tmpdir,
+        )
+        response = _make_chat_completion(
+            content="Persist this!",
+            finish_reason="stop",
+            prompt_tokens=50,
+            completion_tokens=10,
+        )
+        t.normalize_response(response)
+
+        entries = []
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            entries = sorted(f for f in os.listdir(tmpdir) if f.endswith(".json"))
+            if entries:
+                break
+            time.sleep(0.01)
+
+        assert entries, "No JSON file appeared in persist_dir"
+        filepath = os.path.join(tmpdir, entries[0])
+        with open(filepath, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["content"] == "Persist this!"
+        assert data["finish_reason"] == "stop"
+        assert data["usage"]["prompt_tokens"] == 50
+
+
+def test_async_persistence_no_persist_dir(execution_plan: ExecutionPlan):
+    """Without ``persist_dir``, no file is written and no error occurs."""
+    t = XLRTransport(
+        execution_plan=execution_plan,
+        endpoint_url=execution_plan.backend.serve_endpoint,
+        persist_dir=None,
+    )
+    response = _make_chat_completion(content="No-op", finish_reason="stop")
+    result = t.normalize_response(response)
+    assert result.content == "No-op"
+    assert isinstance(result, NormalizedResponse)

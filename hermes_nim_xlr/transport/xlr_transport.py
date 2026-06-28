@@ -15,6 +15,12 @@ identical across turns with identical system prompts.
 
 from __future__ import annotations
 
+import dataclasses
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from itertools import count
+from pathlib import Path
 from typing import Any
 
 from agent.transports.base import ProviderTransport
@@ -34,15 +40,46 @@ class XLRTransport(ProviderTransport):
             model choice, KV-cache config, decode levers, and placement.
         endpoint_url: Base URL of the engine's OpenAI-compatible endpoint
             (e.g. ``"http://127.0.0.1:8080/v1"``).
+        persist_dir: Optional directory path for async persistence of
+            normalized responses. If provided, each response is written as
+            JSON to ``{persist_dir}/turn_{counter}.json`` on a background
+            thread.  If ``None``, persistence is a no-op.
     """
 
     def __init__(
         self,
         execution_plan: ExecutionPlan,
         endpoint_url: str,
+        persist_dir: str | None = None,
     ) -> None:
         self._plan = execution_plan
         self._endpoint_url = endpoint_url.rstrip("/")
+        self._persist_dir = persist_dir
+        self._counter = count()
+        self._executor = ThreadPoolExecutor(max_workers=1)
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _persist_async(self, normalized: NormalizedResponse, response: Any) -> None:
+        """Fire-and-forget persistence on a background thread.
+
+        Writes the normalized response as JSON to a file in
+        ``persist_dir``.  This method returns immediately — the write
+        runs on the single-worker executor, never blocking the main
+        thread.
+
+        Critical invariant: no per-turn entropy is injected into the
+        prompt path (AGENTS.md sec 1).
+        """
+        if self._persist_dir is None:
+            return
+        turn_num = next(self._counter)
+        data = dataclasses.asdict(normalized)
+        payload = json.dumps(data, ensure_ascii=False, default=str)
+
+        self._executor.submit(_write_json, self._persist_dir, turn_num, payload)
 
     @property
     def api_mode(self) -> str:
@@ -212,9 +249,26 @@ class XLRTransport(ProviderTransport):
                 total_tokens=getattr(u, "total_tokens", 0) or 0,
             )
 
-        return NormalizedResponse(
+        normalized = NormalizedResponse(
             content=msg.content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,
         )
+
+        # Async persistence: fire background write, never block delivery
+        self._persist_async(normalized, response)
+
+        return normalized
+
+
+def _write_json(persist_dir: str, turn_num: int, payload: str) -> None:
+    """Write a JSON payload to ``{persist_dir}/turn_{turn_num}.json``.
+
+    This is the target of the background thread — never call it directly
+    on the critical path.
+    """
+    Path(persist_dir).mkdir(parents=True, exist_ok=True)
+    filepath = os.path.join(persist_dir, f"turn_{turn_num}.json")
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(payload)
