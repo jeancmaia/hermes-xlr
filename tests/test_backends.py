@@ -324,6 +324,31 @@ def test_kv_cache_type_omitted_when_f16():
     assert "--cache-type-v" not in cmd
 
 
+def test_grammar_file_flag():
+    """grammar_file emits --grammar-file CLI flag."""
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        grammar_file="C:\\grammars\\test.gbnf",
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    idx = cmd.index("--grammar-file")
+    assert cmd[idx + 1] == "C:\\grammars\\test.gbnf"
+
+
+def test_grammar_file_omitted_when_none():
+    backend = LlamaCppBackend(
+        binary_path=_FAKE_BINARY,
+        model_path=_FAKE_MODEL,
+        start_timeout=0.1,
+        poll_interval=0.01,
+    )
+    cmd = _extract_spawned_command(backend)
+    assert "--grammar-file" not in cmd
+
+
 def test_kv_cache_type_custom_values():
     """Different k/v types emit correctly."""
     backend = LlamaCppBackend(
