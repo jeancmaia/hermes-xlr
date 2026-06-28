@@ -15,244 +15,63 @@ By the end of this guide you'll have:
 
 1. Hermes Agent installed and configured
 2. An XLR-tuned `llama-server` running on your GPU
-3. Hermes chatting through the local engine with tool calls
+3. `XLRTransport` auto-loaded into Hermes — every request carries plan-derived config
+4. Hermes chatting through the local engine with tool calls
 
 ---
 
 ## Step 1 — Install Hermes Agent
 
-Install Hermes Agent the standard way. On Windows (PowerShell):
-
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+git clone https://github.com/jeancmaia/hermes-xlr.git
+cd hermes-xlr
+.\scripts\install-hermes.ps1
 ```
 
-Reload your shell and verify:
-
-```powershell
-hermes --version
-```
-
-> The installer handles Python, Node.js, ripgrep, ffmpeg, and the virtualenv
-> automatically. See the [official installation guide][hermes-install] for
-> details.
-
-[hermes-install]: https://hermes-agent.nousresearch.com/docs/getting-started/installation
+This runs the official Hermes installer (Python, Node.js, ripgrep, ffmpeg — all automatic).
 
 ---
 
 ## Step 2 — Install Hermes-NIM-XLR
 
-XLR is a Python package that lives alongside Hermes. Clone the repo and install
-it in editable mode:
-
 ```powershell
-git clone https://github.com/jeancmaia/hermes-xlr.git
-cd hermes-xlr
-uv sync
+.\scripts\install-xlr.ps1
 ```
 
-Verify the CLI works:
+This single script does everything:
 
-```powershell
-uv run xlr plan
-```
+- Fetches the CUDA `llama-server.exe` binary
+- Downloads a GGUF model from Hugging Face
+- Installs `hermes-nim-xlr` into the Hermes venv
+- Drops a `.pth` hook so Hermes auto-registers `XLRTransport`
+- Configures Hermes to use `http://127.0.0.1:8080/v1` as its provider
 
-You should see a JSON execution plan with your GPU's name, VRAM budget, and
-selected model. If `xlr plan` errors with "no GPU detected", make sure
-`nvidia-smi` is on your PATH (it ships with the NVIDIA driver).
+> Pass `-ModelPath C:\path\to\your.gguf` if you already have a model.
 
 ---
 
-## Step 3 — Stage a model
-
-XLR needs a GGUF model file on local disk. The planner selects the best model
-for your VRAM budget, but you need to download it first.
-
-For a smaller GPU (6–8 GB VRAM), a good starting model is
-**Llama-3.2-3B-Instruct Q4_K_M** (~2 GB on disk):
+## Step 3 — Launch the engine
 
 ```powershell
-# Create a models directory
-mkdir models
-
-# Download from Hugging Face (pick one)
-# Option A: huggingface-cli
-huggingface-cli download QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF Meta-Llama-3.2-3B-Instruct.Q4_K_M.gguf --local-dir models
-
-# Option B: direct URL with curl
-curl -L -o models/Llama-3.2-3B-Instruct-Q4_K_M.gguf https://huggingface.co/QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF/resolve/main/Meta-Llama-3.2-3B-Instruct.Q4_K_M.gguf
+.\scripts\start-xlr-engine.ps1
 ```
 
-> **Context length:** Hermes requires at least 64K tokens of context. XLR
-> configures the engine context size automatically from the execution plan —
-> you don't need to set `--ctx-size` manually.
+The script detects your GPU, generates an execution plan, and launches `llama-server` with all the tuned
+settings — GPU layers, context size, KV-cache dtype, CUDA graphs, speculative decoding. When the engine is
+healthy, it prints the endpoint URL.
 
 ---
 
-## Step 4 — Get a CUDA llama-server binary
-
-XLR drives `llama-server` (from [llama.cpp](https://github.com/ggml-org/llama.cpp))
-as its engine backend. You need a CUDA-enabled build.
-
-**Option A: Download a prebuilt release**
-
-Grab the latest Windows CUDA release from the
-[llama.cpp releases page](https://github.com/ggml-org/llama.cpp/releases). Look
-for `llama-*-bin-win-cuda-cu12*.zip`. Extract `llama-server.exe` and place it
-either:
-
-- In `bin/llama-server.exe` inside the hermes-xlr repo, or
-- Anywhere on your `PATH`
-
-**Option B: Build from source**
-
-```powershell
-git clone https://github.com/ggml-org/llama.cpp
-cd llama.cpp
-cmake -B build -DGGML_CUDA=ON
-cmake --build build --config Release
-# Binary: build/bin/Release/llama-server.exe
-```
-
-> **Tool calling requires `--jinja`:** XLR passes this flag automatically. The
-> model must also support native tool calling — Llama 3.x, Qwen 2.5, and Hermes
-> 2/3 all work. See the [llama.cpp function calling docs][llamacpp-tools] for
-> the full list.
-
-[llamacpp-tools]: https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md
-
-Verify the binary works:
-
-```powershell
-llama-server.exe --version
-```
-
----
-
-## Step 5 — Launch the engine with XLR
-
-This is where XLR earns its keep. Instead of manually guessing flags, XLR
-detects your GPU, picks the right quantization, KV-cache dtype, context size,
-and decode levers — then launches `llama-server` with the optimal config.
-
-### One-liner via the XLR CLI
-
-```powershell
-uv run xlr plan
-```
-
-This prints the execution plan as JSON. Review it to see what XLR chose for
-your hardware. Example output:
-
-```json
-{
-  "model": {
-    "repo": "QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF",
-    "weight_quant": "int4_awq",
-    "est_weight_mb": 1800
-  },
-  "placement": { "gpu_layers": 28, "note": "fully GPU-resident" },
-  "kv": { "dtype": "int8", "enable_block_reuse": true },
-  "levers": { "cuda_graphs": true, "spec_decode": "ngram" },
-  "backend": { "serve_endpoint": "http://127.0.0.1:8080/v1" },
-  "target_ctx_tokens": 65536,
-  "est_vram_mb": 2800
-}
-```
-
-### Start the engine
-
-The simplest way is the launcher script — it detects your GPU, generates the
-plan, and starts the tuned `llama-server` for you:
-
-```powershell
-# If you haven't fetched the binary yet:
-.\scripts\download-cuda-engine.ps1
-
-# Launch — detect, plan, start
-.\scripts\start-xlr-engine.ps1 -ModelPath .\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf
-```
-
-Or start the backend programmatically:
-
-```python
-from hermes_nim_xlr.mapper import detect, plan
-from hermes_nim_xlr.backends import create_backend
-
-host = detect()
-p = plan(host)
-
-backend = create_backend(
-    "llama_cpp",
-    binary_path="C:/tools/llama-server.exe",
-    model_path="models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-    n_gpu_layers=p.placement.gpu_layers,
-    ctx_size=p.target_ctx_tokens,
-    cuda_graphs=p.levers.cuda_graphs,
-    kv_cache_type_k=p.kv.cache_type_k,
-    kv_cache_type_v=p.kv.cache_type_v,
-)
-backend.start()
-
-print(f"Engine ready at {backend.serve_endpoint}")
-# → http://127.0.0.1:8080/v1
-```
-
-The engine is now serving an OpenAI-compatible API at
-`http://127.0.0.1:8080/v1`.
-
----
-
-## Step 6 — Point Hermes at the engine
-
-Now tell Hermes to use the local engine as its LLM provider. Hermes calls this
-a "Custom endpoint" — any OpenAI-compatible API works.
-
-### Interactive setup (recommended)
-
-```powershell
-hermes model
-```
-
-Select **"Custom endpoint (self-hosted / VLLM / etc.)"** and enter:
-
-| Prompt | Value |
-|--------|-------|
-| API base URL | `http://127.0.0.1:8080/v1` |
-| API key | *(leave empty — local server doesn't need one)* |
-| Model name | *(press Enter to auto-detect, or type the GGUF name)* |
-
-### Manual config
-
-Alternatively, edit `~/.hermes/config.yaml` directly:
-
-```yaml
-model:
-  default: Meta-Llama-3.2-3B-Instruct-Q4_K_M
-  provider: custom
-  base_url: http://127.0.0.1:8080/v1
-  api_key: local
-```
-
-Or use `hermes config set`:
-
-```powershell
-hermes config set model.provider custom
-hermes config set model.base_url http://127.0.0.1:8080/v1
-hermes config set model.default Meta-Llama-3.2-3B-Instruct-Q4_K_M
-```
-
----
-
-## Step 7 — Chat
+## Step 4 — Chat
 
 ```powershell
 hermes
 ```
 
-You'll see the Hermes banner with your local model loaded. Try a prompt that
-uses a tool:
+`install-xlr.ps1` already configured Hermes to use the local endpoint and
+dropped a `.pth` hook that auto-registers `XLRTransport`. You're ready to chat.
+
+Try a prompt that uses a tool:
 
 ```
 > What files are in the current directory?

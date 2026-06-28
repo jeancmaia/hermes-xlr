@@ -23,89 +23,50 @@ core.
 
 ## Quick start
 
-### 1. Install Hermes Agent
+Two scripts. That's it.
 
-```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
-```
-
-Verify:
-```powershell
-hermes --version
-```
-
-> The installer handles Python, Node.js, ripgrep, ffmpeg, and the virtualenv automatically.
-> See the [official installation guide](https://hermes-agent.nousresearch.com/docs/getting-started/installation).
-
-### 2. Install Hermes-XLR
+### 1. Install Hermes
 
 ```powershell
 git clone https://github.com/jeancmaia/hermes-xlr.git
 cd hermes-xlr
-uv sync
+.\scripts\install-hermes.ps1
 ```
 
-Verify:
+This runs the official Hermes Agent installer (Python, Node.js, ripgrep, ffmpeg — all handled automatically).
+
+### 2. Install XLR
+
 ```powershell
-uv run xlr plan
+.\scripts\install-xlr.ps1
 ```
 
-You should see a JSON execution plan with your GPU's name, VRAM budget, selected model, and decode levers.
+This does everything else:
 
-### 3. Get a CUDA llama-server binary
+- Fetches the CUDA `llama-server.exe` binary
+- Downloads a GGUF model from Hugging Face (Llama-3.2-3B-Instruct Q4_K_M by default)
+- Installs `hermes-nim-xlr` into the Hermes venv
+- Drops a `.pth` hook so Hermes **auto-registers `XLRTransport`** — every API request
+  carries plan-derived config (`cache_prompt`, KV fraction, CUDA graphs, `n_gpu_layers`, etc.)
+- Configures Hermes to use `http://127.0.0.1:8080/v1` as its provider
 
-```powershell
-.\scripts\download-cuda-engine.ps1
-```
+> Pass `-ModelPath C:\path\to\your.gguf` if you already have a model.
+> Pass `-ModelRepo` / `-ModelFile` for a different Hugging Face model.
 
-This fetches the prebuilt CUDA `llama-server.exe` and matching CUDA runtime DLLs into `bin/`.
-
-### 4. Stage a model
-
-Download a GGUF model (e.g. Llama-3.2-3B-Instruct Q4_K_M, ~2 GB):
-
-```powershell
-mkdir models
-curl -L -o models\Llama-3.2-3B-Instruct-Q4_K_M.gguf `
-  https://huggingface.co/QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF/resolve/main/Meta-Llama-3.2-3B-Instruct.Q4_K_M.gguf
-```
-
-### 5. Launch the XLR-tuned engine
+### 3. Run
 
 ```powershell
-.\scripts\start-xlr-engine.ps1 -ModelPath .\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf
-```
+# Terminal 1 — launch the tuned engine
+.\scripts\start-xlr-engine.ps1
 
-The script detects your GPU, generates an execution plan, and launches `llama-server` with all the tuned
-settings — GPU layers, context size, KV-cache dtype, CUDA graphs, speculative decoding. When the engine is
-healthy, it prints the endpoint URL and Hermes connect instructions.
-
-### 6. Point Hermes at the engine
-
-In another terminal:
-
-```powershell
-hermes model
-```
-
-Select **"Custom endpoint (self-hosted / VLLM / etc.)"** and enter:
-
-| Prompt | Value |
-|--------|-------|
-| API base URL | `http://127.0.0.1:8080/v1` |
-| API key | *(leave empty)* |
-| Model name | *(press Enter to auto-detect)* |
-
-### 7. Chat
-
-```powershell
+# Terminal 2 — start chatting
 hermes
 ```
 
-You're now running Hermes Agent locally on your NVIDIA GPU, tuned by XLR — no cloud API keys, no per-token
-cost, fully private.
+That's it — Hermes Agent running locally on your NVIDIA GPU, tuned by XLR. No cloud API keys,
+no per-token cost, fully private.
 
-> For the full walkthrough with troubleshooting and architecture details, see the
+> For troubleshooting, architecture details, and the full API reference, see the
 > [Integration Guide](docs/integration-guide.md).
 
 ---
@@ -209,36 +170,41 @@ persistence, no speculative side effects).
 
 ```
 hermes_nim_xlr/
-  mapper/      capability mapper — DETECT host/GPU, PLAN the ExecutionPlan
-  transport/   XLRTransport — stateless translation seam over the engine-backend contract
-  backends/    pluggable inference-engine backends and their tuned per-backend configs
-  harness/     measurement harness — honest A/B benchmarking against a vanilla baseline
-  cli.py       `xlr plan` and `xlr benchmark` CLI entry points
+  mapper/        capability mapper — DETECT host/GPU, PLAN the ExecutionPlan
+  transport/     XLRTransport — stateless translation seam over the engine-backend contract
+  backends/      pluggable inference-engine backends and their tuned per-backend configs
+  harness/       measurement harness — honest A/B benchmarking against a vanilla baseline
+  cli.py         `xlr plan` and `xlr benchmark` CLI entry points
+  hermes_hook.py auto-registers XLRTransport into Hermes via .pth hook
 scripts/
-  download-cuda-engine.ps1   fetch prebuilt CUDA llama-server + runtime DLLs
-  start-xlr-engine.ps1        detect → plan → launch tuned engine in one command
+  install-hermes.ps1        install Hermes Agent (runs official installer)
+  install-xlr.ps1           full XLR setup: binary + model + package + Hermes hook + config
+  download-cuda-engine.ps1  fetch prebuilt CUDA llama-server + runtime DLLs
+  start-xlr-engine.ps1      detect → plan → launch tuned engine
 docs/
-  integration-guide.md        end-to-end Hermes + XLR setup walkthrough
-  examples/                   working example script
-  ab-reports/                  A/B benchmark results
-  s2-bring-up.md               CUDA llama.cpp bring-up notes
+  integration-guide.md      end-to-end Hermes + XLR setup walkthrough
+  examples/                  working example script
+  ab-reports/                A/B benchmark results
+  s2-bring-up.md             CUDA llama.cpp bring-up notes
 ```
 
 ## CLI reference
 
 ```powershell
-# XLR
-uv run xlr plan                                                # probe GPU + emit plan as JSON
-uv run xlr benchmark run --endpoint http://127.0.0.1:8080/v1   # A/B benchmark suite
+# Install (one-time)
+.\scripts\install-hermes.ps1                            # install Hermes Agent
+.\scripts\install-xlr.ps1                                # install XLR + model + Hermes hook
 
-# Scripts
-.\scripts\download-cuda-engine.ps1                            # fetch llama-server binary
-.\scripts\start-xlr-engine.ps1 -ModelPath <path>              # launch tuned engine
+# Run
+.\scripts\start-xlr-engine.ps1                          # launch tuned engine
+hermes                                                   # start chatting
 
-# Hermes
-hermes model          # configure provider (choose "Custom endpoint")
-hermes                # start chatting
-hermes doctor         # diagnose issues
+# XLR CLI
+uv run xlr plan                                          # probe GPU + emit plan as JSON
+uv run xlr benchmark run --endpoint http://127.0.0.1:8080/v1  # A/B benchmark suite
+
+# Diagnostics
+hermes doctor                                            # diagnose Hermes issues
 ```
 
 ## Status & roadmap
