@@ -27,12 +27,6 @@ Install Hermes Agent the standard way. On Windows (PowerShell):
 iex (irm https://hermes-agent.nousresearch.com/install.ps1)
 ```
 
-On Linux / macOS / WSL2:
-
-```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-```
-
 Reload your shell and verify:
 
 ```powershell
@@ -363,24 +357,7 @@ Make sure the model supports tool calling. Llama 3.x, Qwen 2.5, and Hermes 2/3
 all work. Nemotron-Mini-4B does **not** — it emits `<toolcall>` XML in text
 instead of structured `tool_calls`.
 
-### Running Hermes in WSL2, engine on Windows host
 
-If Hermes runs inside WSL2 and `llama-server` on Windows, `localhost` won't
-reach the host. Either:
-
-- Enable [WSL2 mirrored networking][wsl-mirror] (Windows 11 22H2+), or
-- Use the Windows host IP: run `ip route show | grep default` inside WSL2,
-  then use that IP instead of `127.0.0.1`.
-
-Also make sure `llama-server` binds to `0.0.0.0` (not just `127.0.0.1`) so
-WSL2 can reach it. XLR's `LlamaCppBackend` defaults to `127.0.0.1`; pass
-`host="0.0.0.0"` if you need external access:
-
-```python
-backend = create_backend("llama_cpp", host="0.0.0.0", ...)
-```
-
-[wsl-mirror]: https://hermes-agent.nousresearch.com/docs/integrations/providers#wsl2-networking-windows-users
 
 ---
 
