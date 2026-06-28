@@ -23,6 +23,7 @@ from hermes_nim_xlr.backends.release_gate import VersionMismatchError
 
 _FAKE_BINARY = "C:\\llama\\llama-server.exe"
 _FAKE_MODEL = "C:\\models\\model.gguf"
+_FAKE_GRAMMAR = "C:\\grammars\\tool-call.gbnf"
 
 
 def _mock_healthy_response() -> mock.MagicMock:
@@ -329,13 +330,13 @@ def test_grammar_file_flag():
     backend = LlamaCppBackend(
         binary_path=_FAKE_BINARY,
         model_path=_FAKE_MODEL,
-        grammar_file="C:\\grammars\\test.gbnf",
+        grammar_file=_FAKE_GRAMMAR,
         start_timeout=0.1,
         poll_interval=0.01,
     )
     cmd = _extract_spawned_command(backend)
     idx = cmd.index("--grammar-file")
-    assert cmd[idx + 1] == "C:\\grammars\\test.gbnf"
+    assert cmd[idx + 1] == _FAKE_GRAMMAR
 
 
 def test_grammar_file_omitted_when_none():
