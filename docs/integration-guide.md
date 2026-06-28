@@ -1,391 +1,427 @@
 # Hermes Agent + XLR Integration Guide
 
-Wire your `hermes-agent` into the Hermes-NIM-XLR runtime for local GPU inference on Windows.
+Run [Hermes Agent](https://hermes-agent.nousresearch.com) locally on your NVIDIA GPU,
+tuned to the metal by the Hermes-NIM-XLR runtime — no cloud API keys, no per-token
+cost, fully private.
 
-The XLR runtime provides four layers — detect, plan, start the engine, and transport — that
-replace the remote API path with a tuned local engine while keeping the same `ProviderTransport`
-contract the agent already speaks.
+XLR detects your hardware, generates an optimized execution plan, and launches a
+tuned `llama.cpp` engine. Hermes Agent then connects to that engine as a
+"Custom endpoint" provider and runs as it would against any cloud LLM — with
+tools, sessions, and multi-turn conversations.
 
-## Prerequisites
+## What you'll get
 
-- Windows with an NVIDIA GPU (CUDA 12.4+)
-- Python 3.11+
-- `hermes-nim-xlr` installed (`uv sync`)
-- A GGUF model file staged locally (e.g. `Llama-3.2-3B-Instruct Q4_K_M`)
-- `llama-server.exe` (CUDA build) on PATH or at `bin/llama-server.exe`
+By the end of this guide you'll have:
 
-Optional:
-- `nvidia-ml-py` for GPU detection via NVML (`pip install nvidia-ml-py`)
+1. Hermes Agent installed and configured
+2. An XLR-tuned `llama-server` running on your GPU
+3. Hermes chatting through the local engine with tool calls
 
-## Quick start
+---
 
-The entire lifecycle is about 30 lines of Python:
+## Step 1 — Install Hermes Agent
+
+Install Hermes Agent the standard way. On Windows (PowerShell):
+
+```powershell
+iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+```
+
+On Linux / macOS / WSL2:
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+```
+
+Reload your shell and verify:
+
+```powershell
+hermes --version
+```
+
+> The installer handles Python, Node.js, ripgrep, ffmpeg, and the virtualenv
+> automatically. See the [official installation guide][hermes-install] for
+> details.
+
+[hermes-install]: https://hermes-agent.nousresearch.com/docs/getting-started/installation
+
+---
+
+## Step 2 — Install Hermes-NIM-XLR
+
+XLR is a Python package that lives alongside Hermes. Clone the repo and install
+it in editable mode:
+
+```powershell
+git clone https://github.com/jeancmaia/hermes-xlr.git
+cd hermes-xlr
+uv sync
+```
+
+Verify the CLI works:
+
+```powershell
+uv run xlr plan
+```
+
+You should see a JSON execution plan with your GPU's name, VRAM budget, and
+selected model. If `xlr plan` errors with "no GPU detected", make sure
+`nvidia-smi` is on your PATH (it ships with the NVIDIA driver).
+
+---
+
+## Step 3 — Stage a model
+
+XLR needs a GGUF model file on local disk. The planner selects the best model
+for your VRAM budget, but you need to download it first.
+
+For a 6 GB GPU (e.g. RTX 3050 Laptop), a good starting model is
+**Llama-3.2-3B-Instruct Q4_K_M** (~2 GB on disk):
+
+```powershell
+# Create a models directory
+mkdir models
+
+# Download from Hugging Face (pick one)
+# Option A: huggingface-cli
+huggingface-cli download QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF Meta-Llama-3.2-3B-Instruct.Q4_K_M.gguf --local-dir models
+
+# Option B: direct URL with curl
+curl -L -o models/Llama-3.2-3B-Instruct-Q4_K_M.gguf https://huggingface.co/QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF/resolve/main/Meta-Llama-3.2-3B-Instruct.Q4_K_M.gguf
+```
+
+> **Context length:** Hermes requires at least 64K tokens of context. XLR
+> configures the engine context size automatically from the execution plan —
+> you don't need to set `--ctx-size` manually.
+
+---
+
+## Step 4 — Get a CUDA llama-server binary
+
+XLR drives `llama-server` (from [llama.cpp](https://github.com/ggml-org/llama.cpp))
+as its engine backend. You need a CUDA-enabled build.
+
+**Option A: Download a prebuilt release**
+
+Grab the latest Windows CUDA release from the
+[llama.cpp releases page](https://github.com/ggml-org/llama.cpp/releases). Look
+for `llama-*-bin-win-cuda-cu12*.zip`. Extract `llama-server.exe` and place it
+either:
+
+- In `bin/llama-server.exe` inside the hermes-xlr repo, or
+- Anywhere on your `PATH`
+
+**Option B: Build from source**
+
+```powershell
+git clone https://github.com/ggml-org/llama.cpp
+cd llama.cpp
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release
+# Binary: build/bin/Release/llama-server.exe
+```
+
+> **Tool calling requires `--jinja`:** XLR passes this flag automatically. The
+> model must also support native tool calling — Llama 3.x, Qwen 2.5, and Hermes
+> 2/3 all work. See the [llama.cpp function calling docs][llamacpp-tools] for
+> the full list.
+
+[llamacpp-tools]: https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md
+
+Verify the binary works:
+
+```powershell
+llama-server.exe --version
+```
+
+---
+
+## Step 5 — Launch the engine with XLR
+
+This is where XLR earns its keep. Instead of manually guessing flags, XLR
+detects your GPU, picks the right quantization, KV-cache dtype, context size,
+and decode levers — then launches `llama-server` with the optimal config.
+
+### One-liner via the XLR CLI
+
+```powershell
+uv run xlr plan
+```
+
+This prints the execution plan as JSON. Review it to see what XLR chose for
+your hardware. Example output (on a 6 GB RTX 3050 Laptop):
+
+```json
+{
+  "model": {
+    "repo": "QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF",
+    "weight_quant": "int4_awq",
+    "est_weight_mb": 1800
+  },
+  "placement": { "gpu_layers": 28, "note": "fully GPU-resident" },
+  "kv": { "dtype": "int8", "enable_block_reuse": true },
+  "levers": { "cuda_graphs": true, "spec_decode": "ngram" },
+  "backend": { "serve_endpoint": "http://127.0.0.1:8080/v1" },
+  "target_ctx_tokens": 65536,
+  "est_vram_mb": 2800
+}
+```
+
+### Start the engine
+
+Use the plan to launch the backend. The easiest way is the example script:
+
+```powershell
+# Set paths to your binary and model
+$env:XLR_BINARY_PATH = "C:\tools\llama-server.exe"
+$env:XLR_MODEL_PATH = "C:\path\to\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+
+# Launch — XLR detects, plans, and starts the tuned engine
+uv run python docs/examples/xlr_hermes_integration.py
+```
+
+Or start the backend programmatically:
 
 ```python
 from hermes_nim_xlr.mapper import detect, plan
 from hermes_nim_xlr.backends import create_backend
-from hermes_nim_xlr.transport import XLRTransport
-from hermes_nim_xlr.contracts import ExecutionPlan
-from agent.transports.types import NormalizedResponse
 
-# 1. Detect the host GPU
 host = detect()
+p = plan(host)
 
-# 2. Generate an execution plan
-plan: ExecutionPlan = plan(host)
-
-# 3. Start the engine backend
 backend = create_backend(
     "llama_cpp",
-    binary_path="bin/llama-server.exe",
+    binary_path="C:/tools/llama-server.exe",
     model_path="models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-    n_gpu_layers=plan.placement.gpu_layers,
-    ctx_size=plan.target_ctx_tokens,
+    n_gpu_layers=p.placement.gpu_layers,
+    ctx_size=p.target_ctx_tokens,
+    cuda_graphs=p.levers.cuda_graphs,
+    kv_cache_type_k=p.kv.cache_type_k,
+    kv_cache_type_v=p.kv.cache_type_v,
 )
 backend.start()
 
-# 4. Create the transport
-transport = XLRTransport(plan, endpoint_url=backend.serve_endpoint)
-
-# 5. Build API kwargs (plan-derived: KV cache, CUDA graphs, spec decode)
-kwargs = transport.build_kwargs(
-    model=plan.model.repo,
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-
-# 6. Call the engine (via openai.OpenAI)
-import openai
-client = openai.OpenAI(base_url=backend.serve_endpoint, api_key="ignored")
-response = client.chat.completions.create(**kwargs)
-
-# 7. Normalize response → native tool_calls, no XML scraping
-normalized: NormalizedResponse = transport.normalize_response(response)
-print(normalized.content)
-
-# 8. Stop the engine
-backend.stop()
+print(f"Engine ready at {backend.serve_endpoint}")
+# → http://127.0.0.1:8080/v1
 ```
+
+The engine is now serving an OpenAI-compatible API at
+`http://127.0.0.1:8080/v1`.
+
+---
+
+## Step 6 — Point Hermes at the engine
+
+Now tell Hermes to use the local engine as its LLM provider. Hermes calls this
+a "Custom endpoint" — any OpenAI-compatible API works.
+
+### Interactive setup (recommended)
+
+```powershell
+hermes model
+```
+
+Select **"Custom endpoint (self-hosted / VLLM / etc.)"** and enter:
+
+| Prompt | Value |
+|--------|-------|
+| API base URL | `http://127.0.0.1:8080/v1` |
+| API key | *(leave empty — local server doesn't need one)* |
+| Model name | *(press Enter to auto-detect, or type the GGUF name)* |
+
+### Manual config
+
+Alternatively, edit `~/.hermes/config.yaml` directly:
+
+```yaml
+model:
+  default: Meta-Llama-3.2-3B-Instruct-Q4_K_M
+  provider: custom
+  base_url: http://127.0.0.1:8080/v1
+  api_key: local
+```
+
+Or use `hermes config set`:
+
+```powershell
+hermes config set model.provider custom
+hermes config set model.base_url http://127.0.0.1:8080/v1
+hermes config set model.default Meta-Llama-3.2-3B-Instruct-Q4_K_M
+```
+
+---
+
+## Step 7 — Chat
+
+```powershell
+hermes
+```
+
+You'll see the Hermes banner with your local model loaded. Try a prompt that
+uses a tool:
+
+```
+> What files are in the current directory?
+```
+
+Hermes will call the terminal tool, read the directory, and respond — all
+running through your local GPU with XLR's tuned config.
+
+### Verify tool calls are native
+
+Tool calls should come back as structured `tool_calls` in the response, not as
+text. If you see raw JSON in the assistant's message instead of tool execution,
+the engine isn't running with `--jinja`. XLR handles this automatically — but
+if you launched `llama-server` manually, add `--jinja` to the command.
+
+---
 
 ## Architecture
 
 ```
-DETECT ──→ HostCapabilities ──→ PLAN ──→ ExecutionPlan ──→ START backend ──→ XLRTransport ──→ Agent loop
-   │                                   │
-   ├ GPU (NVML / nvidia-smi)           ├ Model selection (largest fitting)
-   ├ OS / WSL                          ├ KV-cache dtype (FP8 / INT8 / FP16)
-   ├ CPU RAM                           ├ Layer placement (GPU / shard / offload)
-   └ Container runtime                 ├ Speculative decoding strategy
-                                       └ Estimate bandwidth + VRAM
+┌─────────────────────────────────────────────────────────┐
+│  Hermes Agent                                           │
+│  (tools, sessions, skills, messaging)                   │
+│         │                                                │
+│         │  OpenAI-compatible HTTP                        │
+│         ▼                                                │
+│  http://127.0.0.1:8080/v1                               │
+│         │                                                │
+│         │  XLRTransport (ProviderTransport)              │
+│         │  • build_kwargs() ← plan-derived config        │
+│         │  • normalize_response() ← native tool_calls    │
+│         │  • zero per-turn entropy (prefix-cache safe)   │
+│         │                                                │
+│         ▼                                                │
+│  LlamaCppBackend (llama-server.exe)                      │
+│  • CUDA, KV-quant, CUDA graphs, n-gram spec-decode       │
+│  • All layers GPU-resident (or CPU-offloaded if tight)   │
+└─────────────────────────────────────────────────────────┘
 ```
 
-Every layer is independent — you can skip the mapper and construct an `ExecutionPlan` by hand if
-you know your hardware profile.
+### What XLR adds vs. a plain llama-server
 
-## Layer reference
+| Setting | Manual | XLR |
+|---------|--------|-----|
+| GPU layer count | Guess `-ngl 99` | Plan-driven: exact count for your VRAM |
+| Context size | Guess `-c 65536` | Plan-driven: fits your VRAM budget |
+| KV-cache dtype | Manual `--cache-type-k q8_0` | Plan-driven: FP8 on Ada+, INT8 on Ampere |
+| CUDA graphs | Manual `--cuda-graphs` | Plan-driven: enabled if GPU supports it |
+| Speculative decoding | Manual `--speculative-ngram` | Plan-driven: n-gram when budget allows |
+| Prefix cache | Manual `--cache-prompt` | Plan-driven: block reuse always on |
+| Model selection | Manual | Catalog-driven: largest model that fits |
 
-### 1. DETECT — `detect()`
+### Invariants
 
-```python
-from hermes_nim_xlr.mapper.detect import detect
+1. **Prefix stability** — XLRTransport injects zero per-turn entropy into the
+   request body. No timestamps, UUIDs, or random seeds. The first N bytes are
+   byte-identical across turns with the same system prompt, enabling the
+   engine's prefix cache to fire.
 
-host = detect()
-# host.gpus[0].name           → "NVIDIA GeForce RTX 3050 6GB Laptop GPU"
-# host.gpus[0].arch           → GpuArch.AMPERE
-# host.gpus[0].vram_total_mb  → 6144
-# host.gpus[0].supports_fp8   → True/False
-# host.os                     → "Windows"
-# host.is_wsl                 → False
+2. **Native tool calls** — `normalize_response()` reads the provider's
+   structured `tool_calls` field. No regex or XML scraping of text content.
+
+3. **Transport is stateless translation** — caching, retry, credentials, and
+   streaming live on the Hermes agent, not in the transport. XLRTransport only
+   translates request/response formats.
+
+---
+
+## Troubleshooting
+
+### "Connection refused" at `http://127.0.0.1:8080/v1`
+
+The engine isn't running. Start it with the example script or
+`backend.start()`. Verify with:
+
+```powershell
+curl http://127.0.0.1:8080/v1/models
 ```
 
-Probes GPUs via NVML (primary) or `nvidia-smi` (fallback). Returns an immutable
-`HostCapabilities` frozen dataclass. Bandwidth figures come from a static lookup table
-by GPU name.
+### "context length too small" error in Hermes
 
-Detection is optional — you can construct `HostCapabilities` manually for testing or
-offline planning:
+Hermes requires at least 64K tokens. XLR sets this from the plan's
+`target_ctx_tokens` — if your VRAM is very tight, the planner may reduce it.
+Check `uv run xlr plan` and look for `target_ctx_tokens`. If it's below 65536,
+you need a smaller model or more VRAM.
 
-```python
-from hermes_nim_xlr.contracts import HostCapabilities, GpuCapabilities, GpuArch
+### Tool calls appear as text instead of executing
 
-host = HostCapabilities(
-    os="Windows",
-    is_wsl=False,
-    cpu_ram_gb=32.0,
-    container_runtime=None,
-    has_nvidia_container_toolkit=False,
-    gpus=(
-        GpuCapabilities(
-            index=0,
-            name="NVIDIA GeForce RTX 3050 Laptop GPU",
-            arch=GpuArch.AMPERE,
-            compute_capability=(8, 6),
-            vram_total_mb=6144,
-            vram_free_mb=5120,
-            mem_bandwidth_gbs=192.0,
-            pcie_bandwidth_gbs=8.0,
-            supports_fp8=False,
-            supports_int8=True,
-            supports_cuda_graphs=True,
-            driver_version="572.40",
-        ),
-    ),
-)
+The engine needs `--jinja` for native tool calling. XLR passes this
+automatically; if you launched `llama-server` manually, add `--jinja` to the
+command. Verify with:
+
+```powershell
+curl http://127.0.0.1:8080/props
 ```
 
-### 2. PLAN — `plan()`
+The `chat_template` field should be present.
+
+### Model loads but produces garbage
+
+Make sure the model supports tool calling. Llama 3.x, Qwen 2.5, and Hermes 2/3
+all work. Nemotron-Mini-4B does **not** — it emits `<toolcall>` XML in text
+instead of structured `tool_calls`.
+
+### Running Hermes in WSL2, engine on Windows host
+
+If Hermes runs inside WSL2 and `llama-server` on Windows, `localhost` won't
+reach the host. Either:
+
+- Enable [WSL2 mirrored networking][wsl-mirror] (Windows 11 22H2+), or
+- Use the Windows host IP: run `ip route show | grep default` inside WSL2,
+  then use that IP instead of `127.0.0.1`.
+
+Also make sure `llama-server` binds to `0.0.0.0` (not just `127.0.0.1`) so
+WSL2 can reach it. XLR's `LlamaCppBackend` defaults to `127.0.0.1`; pass
+`host="0.0.0.0"` if you need external access:
 
 ```python
-from hermes_nim_xlr.mapper import plan
-
-execution_plan = plan(host)
-
-# Key fields:
-# execution_plan.model.repo               → "QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF"
-# execution_plan.model.weight_quant        → WeightQuant.INT4_AWQ
-# execution_plan.kv.dtype                  → KvDtype.INT8
-# execution_plan.levers.cuda_graphs        → True
-# execution_plan.levers.spec_decode        → SpecDecode.NGRAM
-# execution_plan.placement.gpu_layers      → 28 (fully resident)
-# execution_plan.backend.kind              → BackendKind.LLAMACPP
-# execution_plan.backend.serve_endpoint    → "http://127.0.0.1:8080/v1"
-# execution_plan.est_vram_mb               → 2800
-# execution_plan.est_decode_tok_s          → (30, 50)
+backend = create_backend("llama_cpp", host="0.0.0.0", ...)
 ```
 
-The planner is deterministic — identical input always yields the same plan. Every branch
-appends a human-readable rationale line.
+[wsl-mirror]: https://hermes-agent.nousresearch.com/docs/integrations/providers#wsl2-networking-windows-users
 
-Two objectives:
-- `THROUGHPUT_FIRST` — avoids CPU offload; prefers smaller models fully resident
-- `QUALITY_FIRST` — accepts a PCIe-cliff penalty to run a larger model
+---
 
-```python
-execution_plan = plan(host, objective=Objective.QUALITY_FIRST)
+## Reference
+
+### CLI quick reference
+
+```powershell
+# XLR
+uv run xlr plan                                          # probe + emit plan as JSON
+uv run xlr benchmark run --endpoint http://127.0.0.1:8080/v1  # A/B benchmarks
+
+# Hermes
+hermes model          # configure provider (choose "Custom endpoint")
+hermes                # start chatting
+hermes --tui          # modern TUI
+hermes doctor         # diagnose issues
 ```
 
-You can also build an `ExecutionPlan` by hand for complete control:
+### API quick reference
 
 ```python
-from hermes_nim_xlr.contracts import (
-    ExecutionPlan, ModelChoice, WeightQuant, KvCacheConfig, KvDtype,
-    DecodeLevers, SpecDecode, LayerPlacement, BackendChoice, BackendKind,
-    BringUp, Objective,
-)
-
-execution_plan = ExecutionPlan(
-    objective=Objective.THROUGHPUT_FIRST,
-    model=ModelChoice(
-        repo="QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF",
-        params_b=3.2,
-        weight_quant=WeightQuant.INT4_AWQ,
-        est_weight_mb=1800,
-        n_layers=28,
-        kv_heads=8,
-        head_dim=128,
-        max_context_tokens=8192,
-    ),
-    placement=LayerPlacement(
-        total_layers=28, gpu_layers=28, cpu_offload_layers=0,
-        tensor_parallel=1, pipeline_parallel=1,
-        note="fully GPU-resident",
-    ),
-    kv=KvCacheConfig(
-        dtype=KvDtype.INT8, enable_block_reuse=True,
-        free_gpu_memory_fraction=0.35, host_cache_size_bytes=0,
-    ),
-    levers=DecodeLevers(
-        cuda_graphs=True, spec_decode=SpecDecode.NGRAM, draft_model=None,
-    ),
-    backend=BackendChoice(
-        kind=BackendKind.LLAMACPP, bring_up=BringUp.NATIVE_WINDOWS,
-        serve_endpoint="http://127.0.0.1:8080/v1",
-    ),
-    target_ctx_tokens=4096,
-    est_vram_mb=2800,
-    est_decode_tok_s=(30, 50),
-    rationale=("INT4 weights for ~5000 MB budget", "fully GPU-resident"),
-    warnings=(),
-)
-```
-
-### 3. START — engine backend
-
-```python
+# Detect → Plan → Start → Transport
+from hermes_nim_xlr.mapper import detect, plan
 from hermes_nim_xlr.backends import create_backend
-
-backend = create_backend(
-    "llama_cpp",
-    binary_path="bin/llama-server.exe",
-    model_path="models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-    n_gpu_layers=-1,                       # -1 = all layers
-    ctx_size=4096,
-    cuda_graphs=True,                       # --cuda-graphs
-    speculative_ngram=32,                   # --speculative-ngram 32
-    kv_cache_type_k="q8_0",                # --cache-type-k q8_0
-    kv_cache_type_v="q8_0",                # --cache-type-v q8_0
-)
-backend.start()
-
-# endpoint = backend.serve_endpoint  → "http://127.0.0.1:8080/v1"
-# info    = backend.engine_info       → {"version": "b9763", "cuda": 1, ...}
-```
-
-`create_backend()` looks up the registered class by kind name (`"llama_cpp"`). The
-backend manages the full process lifecycle — spawn, health-poll, and graceful stop.
-
-Lifecycle methods:
-- `start()` — assert version match, spawn process, poll until healthy
-- `stop()` — graceful shutdown with timeout
-- `health()` — lightweight check (GET /v1/models)
-
-Available factory functions:
-- `register(kind, cls)` — register a custom backend class
-- `create_backend(kind, **kwargs)` — instantiate by kind name
-
-```python
-from hermes_nim_xlr.backends import register
-
-# Register a custom backend
-register("my_engine", MyEngineBackend)
-backend = create_backend("my_engine", ...)
-```
-
-### 4. TRANSPORT — XLRTransport
-
-`XLRTransport` is a `ProviderTransport` for the `chat_completions` api_mode. It
-implements the four-method contract:
-
-| Method | Purpose |
-|--------|---------|
-| `api_mode` | Returns `"chat_completions"` |
-| `convert_messages(messages)` | Strips internal scaffolding keys; pass-through otherwise |
-| `convert_tools(tools)` | Identity — tools already in OpenAI format |
-| `build_kwargs(model, messages, tools, **params)` | Wires plan-derived config into `extra_body` |
-| `normalize_response(response)` | Extracts native `tool_calls`; returns `NormalizedResponse` |
-
-```python
 from hermes_nim_xlr.transport import XLRTransport
 
-transport = XLRTransport(
-    execution_plan=execution_plan,
-    endpoint_url="http://127.0.0.1:8080/v1",
-    persist_dir=None,              # optional: async persistence to JSON
-)
+host = detect()
+p = plan(host)
+
+backend = create_backend("llama_cpp", binary_path=..., model_path=...)
+backend.start()
+
+transport = XLRTransport(p, endpoint_url=backend.serve_endpoint)
+kwargs = transport.build_kwargs(model=p.model.repo, messages=messages, tools=tools)
+# → pass kwargs to openai.OpenAI().chat.completions.create(**kwargs)
 ```
 
-**Critical invariant:** The transport injects zero per-turn entropy. No timestamps,
-UUIDs, or random seeds appear in the request body — the first N bytes are stable
-across turns, enabling prefix caching.
+### Files
 
-#### ProviderTransport contract (for AIAgent integration)
-
-To use XLRTransport with `hermes-agent`'s `AIAgent`:
-
-```python
-from agent.transports import register_transport
-
-# Register XLRTransport so AIAgent._get_transport() picks it up
-register_transport("chat_completions", XLRTransport)
-```
-
-**Note:** `get_transport()` instantiates transports with no arguments (`cls()`), but
-`XLRTransport.__init__` requires `execution_plan` and `endpoint_url`. For full AIAgent
-integration, create a factory or partial that provides these:
-
-```python
-from functools import partial
-from agent.transports import register_transport
-
-# You would need a wrapper that captures plan + endpoint
-# and passes them to XLRTransport on construction.
-```
-
-The simplest approach for a `hermes-agent` loop is to use `XLRTransport` directly to
-build kwargs and normalize responses, rather than routing through the agent's
-auto-discovery path. The example script in `docs/examples/` demonstrates this pattern.
-
-## Running the example
-
-```powershell
-# Set paths to your binaries and model
-$env:XLR_BINARY_PATH = "C:\tools\llama-server.exe"
-$env:XLR_MODEL_PATH = "C:\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-
-# Run the example
-uv run python docs/examples/xlr_hermes_integration.py
-```
-
-Expected output (approximate):
-
-```
-=== Phase 1: DETECT ===
-  OS:   Windows
-  GPU:  [NVIDIA GeForce RTX 3050 6GB Laptop GPU]
-
-=== Phase 2: PLAN ===
-  Model:    QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF
-  Backend:  llama_cpp
-  Endpoint: http://127.0.0.1:8080/v1
-  VRAM est: 2800 MiB
-  Levers:   CUDA graphs=True, spec=ngram
-
-=== Phase 3: START ===
-  Starting backend (binary=bin/llama-server.exe)...
-  Endpoint healthy at http://127.0.0.1:8080/v1
-
-=== Phase 4: TRANSPORT ===
-  XLRTransport ready: api_mode=chat_completions
-
-=== Phase 5: RUN ===
-  Tokens: 179 prompt + 17 completion
-  Tool call: get_weather({"city": "Paris"})
-    ...
-=== Done — 3 turns completed ===
-```
-
-## ProviderTransport contract mapping
-
-`XLRTransport` maps to the hermes-agent `ProviderTransport` ABC as follows:
-
-| ABC method | XLRTransport behaviour | Notes |
-|---|---|---|
-| `api_mode` | `"chat_completions"` | Matches the engine's OpenAI-compatible API |
-| `convert_messages` | Strip internal keys | `_`-prefixed, `tool_name`, `timestamp`, Codex fields |
-| `convert_tools` | Identity | Tools already in OpenAI `functions` / `tools` format |
-| `build_kwargs` | Wire plan into `extra_body` | KV-cache, CUDA graphs, spec-decode, layers, ctx size |
-| `normalize_response` | Extract native `tool_calls` | Structured `function.name` + `function.arguments`, no regex |
-| `validate_response` | Not overridden | Default returns `True` |
-| `extract_cache_stats` | Not overridden | Default returns `None` |
-| `map_finish_reason` | Not overridden | Default returns raw reason |
-
-## Invariants
-
-1. **Prefix stability** — no per-turn entropy in the prompt path (`extra_body` is
-   plan-derived, never contains timestamps/UUIDs). The first N bytes of the request
-   body are identical across turns with the same system prompt.
-
-2. **Native tool calls** — `normalize_response` reads the provider's structured
-   `tool_calls` field. No regex or XML scraping of text content.
-
-3. **Transport is stateless** — caching, retry, credentials, and streaming live on
-   the agent, not in the transport.
-
-4. **Latency hiding is additive** — async persistence fires on a background thread
-   and does not block `normalize_response` return.
-
-## CLI quick reference
-
-```powershell
-# Probe the host and print the execution plan as JSON
-uv run xlr plan
-
-# Run the benchmark suite (requires a running engine)
-uv run xlr benchmark run --endpoint http://127.0.0.1:8080/v1
-```
-
-## See also
-
-- `docs/examples/xlr_hermes_integration.py` — working multi-turn example
+- `docs/examples/xlr_hermes_integration.py` — working example script
 - `docs/s2-bring-up.md` — CUDA llama.cpp bring-up notes
 - `docs/s0.5-verdict.md` — spike go/no-go and capacity findings
 - `docs/ab-protocol.md` — A/B measurement protocol
