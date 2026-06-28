@@ -26,6 +26,7 @@ from typing import Any
 from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse, ToolCall, Usage
 
+import hermes_nim_xlr.transport._safe_tools as _safe_tools_mod
 from hermes_nim_xlr.contracts import ExecutionPlan
 
 
@@ -57,6 +58,7 @@ class XLRTransport(ProviderTransport):
         self._persist_dir = persist_dir
         self._counter = count()
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._prefetch_cache: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Persistence
@@ -80,6 +82,65 @@ class XLRTransport(ProviderTransport):
         payload = json.dumps(data, ensure_ascii=False, default=str)
 
         self._executor.submit(_write_json, self._persist_dir, turn_num, payload)
+
+    # ------------------------------------------------------------------
+    # Prefetch cache — safe read-only tool speculation
+    # ------------------------------------------------------------------
+
+    def _prefetch_tool_calls(
+        self, tool_calls: list[ToolCall]
+    ) -> dict[str, dict[str, Any]]:
+        """Cache safe tool calls for speculative prefetch on the next turn.
+
+        For each tool call whose name is in ``SAFE_TOOLS``, store the
+        call metadata in ``_prefetch_cache`` keyed by call ID. Returns
+        the subset of calls that were cached.
+
+        Side-effecting tools are never cached.
+        """
+        cached: dict[str, dict[str, Any]] = {}
+        for tc in tool_calls:
+            if tc.name in _safe_tools_mod.SAFE_TOOLS and tc.id:
+                entry: dict[str, Any] = {
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                    "result": None,
+                }
+                self._prefetch_cache[tc.id] = entry
+                cached[tc.id] = entry
+        return cached
+
+    def store_tool_result(self, tool_call_id: str, result: str) -> None:
+        """Store a prefetched tool result so ``build_kwargs`` can consume it.
+
+        Args:
+            tool_call_id: The ID of the tool call the result belongs to.
+            result: The tool output (typically JSON or plain text).
+        """
+        if tool_call_id in self._prefetch_cache:
+            self._prefetch_cache[tool_call_id]["result"] = result
+
+    def _consume_prefetch(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Scan messages for tool results that have cached prefetches.
+
+        Tool result messages whose ``tool_call_id`` is found in the
+        prefetch cache with a non-``None`` result are tagged with
+        ``_prefetch_cached: True`` so the caller (or harness) can
+        recognise them as cache-served and potentially skip redundant
+        tool execution.
+
+        Returns the (possibly tagged) message list.
+        """
+        for msg in messages:
+            if (
+                isinstance(msg, dict)
+                and msg.get("role") == "tool"
+                and msg.get("tool_call_id") in self._prefetch_cache
+            ):
+                cached = self._prefetch_cache[msg["tool_call_id"]]
+                if cached["result"] is not None:
+                    msg["_prefetch_cached"] = True
+        return messages
 
     @property
     def api_mode(self) -> str:
@@ -154,6 +215,10 @@ class XLRTransport(ProviderTransport):
         or date strings are injected into the payload.
         """
         sanitized = self.convert_messages(messages)
+
+        # Consume prefetch cache: tag tool results whose content was
+        # already fetched during decode
+        sanitized = self._consume_prefetch(sanitized)
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -258,6 +323,10 @@ class XLRTransport(ProviderTransport):
 
         # Async persistence: fire background write, never block delivery
         self._persist_async(normalized, response)
+
+        # Prefetch cache: record safe tool calls for speculative use
+        if tool_calls:
+            self._prefetch_tool_calls(tool_calls)
 
         return normalized
 
