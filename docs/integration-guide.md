@@ -163,15 +163,15 @@ your hardware. Example output:
 
 ### Start the engine
 
-Use the plan to launch the backend. The easiest way is the example script:
+The simplest way is the launcher script — it detects your GPU, generates the
+plan, and starts the tuned `llama-server` for you:
 
 ```powershell
-# Set paths to your binary and model
-$env:XLR_BINARY_PATH = "C:\tools\llama-server.exe"
-$env:XLR_MODEL_PATH = "C:\path\to\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+# If you haven't fetched the binary yet:
+.\scripts\download-cuda-engine.ps1
 
-# Launch — XLR detects, plans, and starts the tuned engine
-uv run python docs/examples/xlr_hermes_integration.py
+# Launch — detect, plan, start
+.\scripts\start-xlr-engine.ps1 -ModelPath .\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf
 ```
 
 Or start the backend programmatically:
