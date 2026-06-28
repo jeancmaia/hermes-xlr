@@ -783,3 +783,234 @@ def test_async_persistence_no_persist_dir(execution_plan: ExecutionPlan):
     result = t.normalize_response(response)
     assert result.content == "No-op"
     assert isinstance(result, NormalizedResponse)
+
+
+# ===========================================================================
+# Safe read-only prefetch (HER-26 / S6c)
+# ===========================================================================
+
+
+def test_prefetch_safe_tool_triggers_cache(transport: XLRTransport):
+    """A safe (idempotent) tool name triggers speculative prefetch caching."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_read",
+                "name": "file_read",
+                "arguments": '{"path": "/etc/hostname"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    result = transport.normalize_response(response)
+    assert result.tool_calls is not None
+
+    cache = transport._prefetch_cache
+    assert "call_read" in cache
+    assert cache["call_read"]["name"] == "file_read"
+    assert cache["call_read"]["arguments"] == '{"path": "/etc/hostname"}'
+    assert cache["call_read"]["result"] is None
+
+
+def test_prefetch_side_effect_tool_does_not_cache(transport: XLRTransport):
+    """A side-effecting tool name must NOT trigger speculative prefetch."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_write",
+                "name": "web_search_write",
+                "arguments": '{"query": "test"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    result = transport.normalize_response(response)
+    assert result.tool_calls is not None
+
+    assert "call_write" not in transport._prefetch_cache
+
+
+def test_prefetch_multiple_tools_mixed(transport: XLRTransport):
+    """Only safe tools are cached; side-effecting tools are skipped."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_safe",
+                "name": "web_search_read",
+                "arguments": '{"query": "AI news"}',
+            },
+            {
+                "id": "call_side",
+                "name": "send_email",
+                "arguments": '{"to": "admin@example.com"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    result = transport.normalize_response(response)
+    assert result.tool_calls is not None
+
+    assert "call_safe" in transport._prefetch_cache
+    assert "call_side" not in transport._prefetch_cache
+
+
+def test_prefetch_no_tool_calls_no_cache(transport: XLRTransport):
+    """A text response with no tool calls must not populate the cache."""
+    response = _make_chat_completion(content="Hello", finish_reason="stop")
+    transport.normalize_response(response)
+    assert len(transport._prefetch_cache) == 0
+
+
+def test_store_tool_result(transport: XLRTransport):
+    """Store a prefetched result so build_kwargs can consume it."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_doc",
+                "name": "document_search",
+                "arguments": '{"query": "contract clause"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    transport.normalize_response(response)
+    assert transport._prefetch_cache["call_doc"]["result"] is None
+
+    transport.store_tool_result("call_doc", '{"match": "Section 5.1"}')
+    assert transport._prefetch_cache["call_doc"]["result"] == '{"match": "Section 5.1"}'
+
+
+def test_store_tool_result_unknown_id(transport: XLRTransport):
+    """Storing a result for an unknown call ID must not crash."""
+    transport.store_tool_result("nonexistent", "some data")
+    assert "nonexistent" not in transport._prefetch_cache
+
+
+def test_consume_prefetch_tags_cached_result(transport: XLRTransport):
+    """A tool result with a cached prefetch must be tagged ``_prefetch_cached``."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_vec",
+                "name": "vector_search",
+                "arguments": '{"query": "test vector"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    transport.normalize_response(response)
+    transport.store_tool_result("call_vec", '{"result": "vec data"}')
+
+    messages = [
+        {"role": "user", "content": "Show me results"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_vec",
+            "content": '{"result": "vec data"}',
+        },
+    ]
+    tagged = transport._consume_prefetch(messages)
+    assert tagged[1].get("_prefetch_cached") is True
+
+
+def test_consume_prefetch_no_cache_no_tag(transport: XLRTransport):
+    """A tool result NOT in the cache must not be tagged."""
+    messages = [
+        {"role": "user", "content": "Hello"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_unknown",
+            "content": "result",
+        },
+    ]
+    tagged = transport._consume_prefetch(messages)
+    assert "_prefetch_cached" not in tagged[1]
+
+
+def test_consume_prefetch_no_result_not_tagged(transport: XLRTransport):
+    """A cached entry with result=None must not tag the message."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_pending",
+                "name": "web_search_read",
+                "arguments": '{"query": "pending"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    transport.normalize_response(response)
+    assert transport._prefetch_cache["call_pending"]["result"] is None
+
+    messages = [
+        {"role": "tool", "tool_call_id": "call_pending", "content": ""},
+    ]
+    tagged = transport._consume_prefetch(messages)
+    assert "_prefetch_cached" not in tagged[0]
+
+
+def test_build_kwargs_integrates_prefetch(transport: XLRTransport):
+    """build_kwargs must call _consume_prefetch so cached results are tagged."""
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_build",
+                "name": "memory_lookup",
+                "arguments": '{"key": "user_prefs"}',
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+    transport.normalize_response(response)
+    transport.store_tool_result("call_build", '{"theme": "dark"}')
+
+    messages = [
+        {"role": "user", "content": "What are my prefs?"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_build",
+            "content": '{"theme": "dark"}',
+        },
+    ]
+    kwargs = transport.build_kwargs(model="test-model", messages=messages)
+    tool_msg = kwargs["messages"][1]
+    assert tool_msg.get("_prefetch_cached") is True
+
+
+def test_prefetch_cache_respects_SAFE_TOOLS_patch():
+    """Patching SAFE_TOOLS must affect which tools get cached."""
+    from unittest.mock import patch
+
+    import hermes_nim_xlr.transport._safe_tools as st
+
+    ep = mock.MagicMock(spec=ExecutionPlan)
+    t = XLRTransport(ep, endpoint_url="http://127.0.0.1:8080/v1")
+
+    response = _make_chat_completion(
+        content=None,
+        tool_calls_data=[
+            {
+                "id": "call_custom",
+                "name": "custom_read_tool",
+                "arguments": "{}",
+            },
+        ],
+        finish_reason="tool_calls",
+    )
+
+    with patch.object(st, "SAFE_TOOLS", frozenset({"custom_read_tool"})):
+        t.normalize_response(response)
+        assert "call_custom" in t._prefetch_cache
+
+    t._prefetch_cache.clear()
+
+    with patch.object(st, "SAFE_TOOLS", frozenset()):
+        t.normalize_response(response)
+        assert "call_custom" not in t._prefetch_cache
