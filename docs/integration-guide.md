@@ -69,7 +69,7 @@ selected model. If `xlr plan` errors with "no GPU detected", make sure
 XLR needs a GGUF model file on local disk. The planner selects the best model
 for your VRAM budget, but you need to download it first.
 
-For a 6 GB GPU (e.g. RTX 3050 Laptop), a good starting model is
+For a smaller GPU (6–8 GB VRAM), a good starting model is
 **Llama-3.2-3B-Instruct Q4_K_M** (~2 GB on disk):
 
 ```powershell
@@ -143,7 +143,7 @@ uv run xlr plan
 ```
 
 This prints the execution plan as JSON. Review it to see what XLR chose for
-your hardware. Example output (on a 6 GB RTX 3050 Laptop):
+your hardware. Example output:
 
 ```json
 {
