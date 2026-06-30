@@ -235,6 +235,8 @@ class XLRTransport(ProviderTransport):
         max_tokens = params.get("max_tokens")
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = 4096
 
         extra_body["cache_prompt"] = self._plan.kv.enable_block_reuse
         extra_body["kv_cache_free_gpu_mem_fraction"] = (
