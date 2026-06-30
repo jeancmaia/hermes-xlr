@@ -38,7 +38,7 @@ def _serialize_plan(execution_plan: contracts.ExecutionPlan) -> str:
 def _cmd_plan(args: argparse.Namespace) -> int:
     host = detect.detect()
     objective = contracts.Objective(args.objective)
-    execution_plan = plan(host, objective=objective)
+    execution_plan = plan(host, objective=objective, min_context_tokens=args.min_ctx)
     print(_serialize_plan(execution_plan))
     return 0
 
@@ -325,6 +325,12 @@ def main(argv: list[str] | None = None) -> int:
             contracts.Objective.QUALITY_FIRST.value,
         ],
         default=contracts.Objective.THROUGHPUT_FIRST.value,
+    )
+    plan_parser.add_argument(
+        "--min-ctx",
+        type=int,
+        default=0,
+        help="minimum context window in tokens (default: no constraint)",
     )
 
     benchmark_parser = subparsers.add_parser(

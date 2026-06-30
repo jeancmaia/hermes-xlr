@@ -26,8 +26,8 @@
 
 param(
     [string]$ModelPath,
-    [string]$ModelRepo = "QuantFactory/Meta-Llama-3.2-3B-Instruct-GGUF",
-    [string]$ModelFile = "Meta-Llama-3.2-3B-Instruct.Q4_K_M.gguf"
+    [string]$ModelRepo = "bartowski/Llama-3.2-3B-Instruct-GGUF",
+    [string]$ModelFile = "Llama-3.2-3B-Instruct-Q4_K_M.gguf"
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,7 +100,7 @@ Write-OK "Python:        $hermesPython"
 # Step 1: CUDA llama-server binary
 # ---------------------------------------------------------------------------
 
-Write-Step "Step 1/5 — CUDA engine binary"
+Write-Step "Step 1/5 -- CUDA engine binary"
 
 $binaryPath = Join-Path $binDir "llama-server.exe"
 
@@ -121,7 +121,7 @@ Write-OK "Engine: $binaryPath"
 # Step 2: GGUF model
 # ---------------------------------------------------------------------------
 
-Write-Step "Step 2/5 — Model"
+Write-Step "Step 2/5 -- Model"
 
 if ($ModelPath -and (Test-Path $ModelPath)) {
     Write-OK "Using provided model: $ModelPath"
@@ -138,8 +138,8 @@ if ($ModelPath -and (Test-Path $ModelPath)) {
         $url = "https://huggingface.co/$ModelRepo/resolve/main/$ModelFile"
         Write-Info "Downloading model from Hugging Face..."
         Write-Info "  $url"
-        Write-Info "  (this may take a few minutes — ~2 GB)"
-        & curl -L -o $downloadPath $url
+        Write-Info "  (this may take a few minutes -- ~2 GB)"
+        & curl.exe -L -o $downloadPath $url
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $downloadPath)) {
             Write-Err "Model download failed."
             Write-Host ""
@@ -156,18 +156,20 @@ if ($ModelPath -and (Test-Path $ModelPath)) {
 # Step 3: Install hermes-nim-xlr into Hermes venv
 # ---------------------------------------------------------------------------
 
-Write-Step "Step 3/5 — Install hermes-nim-xlr"
+Write-Step "Step 3/5 -- Install hermes-nim-xlr"
 
 Write-Info "Installing into Hermes venv..."
-& uv pip install --python $hermesPython -e $repoRoot
+$haveUv = Get-Command uv -ErrorAction SilentlyContinue
+if ($haveUv) {
+    & uv pip install --python $hermesPython -e $repoRoot
+} else {
+    Write-Info "uv not found, using pip directly..."
+    & $hermesPython -m pip install -e $repoRoot
+}
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Info "uv not found, trying pip directly..."
-    & $hermesPython -m pip install -e $repoRoot
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Failed to install hermes-nim-xlr into Hermes venv."
-        exit 1
-    }
+    Write-Err "Failed to install hermes-nim-xlr into Hermes venv."
+    exit 1
 }
 
 Write-OK "hermes-nim-xlr installed"
@@ -176,7 +178,7 @@ Write-OK "hermes-nim-xlr installed"
 # Step 4: Drop .pth hook so Hermes auto-loads XLRTransport
 # ---------------------------------------------------------------------------
 
-Write-Step "Step 4/5 — Wire XLRTransport into Hermes"
+Write-Step "Step 4/5 -- Wire XLRTransport into Hermes"
 
 $hookContent = "import hermes_nim_xlr.hermes_hook`n"
 $pthPath = Join-Path $hermesSitePackages "_hermes_xlr_hook.pth"
@@ -191,8 +193,8 @@ Write-Info "Verifying hook loads..."
 & $hermesPython -c "import hermes_nim_xlr.hermes_hook; print('OK')" 2>&1
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Err "Hook verification failed — check GPU detection."
-    Write-Host "  Continuing anyway — Hermes will fall back to its stock transport." -ForegroundColor Yellow
+    Write-Err "Hook verification failed -- check GPU detection."
+    Write-Host "  Continuing anyway -- Hermes will fall back to its stock transport." -ForegroundColor Yellow
 } else {
     Write-OK "Hook loads successfully"
 }
@@ -201,26 +203,27 @@ if ($LASTEXITCODE -ne 0) {
 # Step 5: Configure Hermes to use the local endpoint
 # ---------------------------------------------------------------------------
 
-Write-Step "Step 5/5 — Configure Hermes"
+Write-Step "Step 5/5 -- Configure Hermes"
 
 # Set model config
 & hermes config set model.provider custom
 & hermes config set model.base_url "http://127.0.0.1:8080/v1"
 & hermes config set model.api_key "local"
 
-# Try auto-detecting the model name from the plan
-$modelName = & $hermesPython -c "
-import sys; sys.path.insert(0, r'$repoRoot')
-from hermes_nim_xlr.mapper import detect, plan
-p = plan(detect())
-print(p.model.repo)
-" 2>$null
+# Derive model name from the actual GGUF filename, not the plan — the plan
+# selects by VRAM budget and may pick a different model than what was downloaded.
+$modelName = ""
+if ($ModelPath) {
+    $modelBase = [System.IO.Path]::GetFileNameWithoutExtension($ModelPath)
+    # Strip GGUF quant suffix (e.g. "Q4_K_M", "Q8_0") for a clean name
+    $modelName = $modelBase -replace '-?(?:Q[2468]_[A-Z0-9_]+|IQ[0-9_]+|FP16|FP32).*$', ''
+}
 
 if ($modelName) {
     & hermes config set model.default $modelName
-    Write-OK "Model: $modelName"
+    Write-OK "Model: $modelName (from GGUF filename)"
 } else {
-    # Fall back to the GGUF filename without extension
+    # Fallback: use GGUF filename without extension
     $modelBase = [System.IO.Path]::GetFileNameWithoutExtension($ModelFile)
     & hermes config set model.default $modelBase
     Write-OK "Model: $modelBase (from filename)"
@@ -244,5 +247,5 @@ Write-Host ""
 Write-Host "    2. Start Hermes in another terminal:" -ForegroundColor White
 Write-Host "       hermes" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  XLRTransport is auto-loaded — every request carries plan-derived config." -ForegroundColor Green
+Write-Host "  XLRTransport is auto-loaded -- every request carries plan-derived config." -ForegroundColor Green
 Write-Host ""

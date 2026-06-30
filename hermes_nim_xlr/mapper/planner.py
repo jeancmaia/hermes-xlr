@@ -145,6 +145,7 @@ def _select_model_for_objective(
     weight_quant: contracts.WeightQuant,
     weight_budget: int,
     objective: contracts.Objective,
+    min_context_tokens: int = 0,
 ) -> contracts.ModelChoice:
     """Pick the model according to the speed-vs-quality policy.
 
@@ -152,19 +153,35 @@ def _select_model_for_objective(
     model that still leaves headroom for the KV cache. ``QUALITY_FIRST``
     ignores that cap and takes the strongest model available for the chosen
     quant, accepting that layers may have to CPU-offload.
+
+    When ``min_context_tokens > 0``, models whose ``max_context_tokens``
+    falls below the threshold are excluded.
     """
+    all_candidates = [m for m in catalog_ref.CATALOG if m.weight_quant is weight_quant]
+    if min_context_tokens > 0:
+        all_candidates = [
+            m for m in all_candidates if m.max_context_tokens >= min_context_tokens
+        ]
     if objective is contracts.Objective.QUALITY_FIRST:
-        candidates = [m for m in catalog_ref.CATALOG if m.weight_quant is weight_quant]
-        if not candidates:
-            raise ValueError(f"no {weight_quant.value} model in catalog")
-        return max(candidates, key=lambda m: m.est_weight_mb)
-    return catalog_ref.largest_fitting(weight_quant, budget_mb=weight_budget)
+        if not all_candidates:
+            raise ValueError(
+                f"no {weight_quant.value} model meets {min_context_tokens} ctx"
+            )
+        return max(all_candidates, key=lambda m: m.est_weight_mb)
+    fitting = [m for m in all_candidates if m.est_weight_mb <= weight_budget]
+    if not fitting:
+        raise ValueError(
+            f"no {weight_quant.value} model fits a {weight_budget} MB budget"
+            + (f" with {min_context_tokens}+ ctx" if min_context_tokens else "")
+        )
+    return max(fitting, key=lambda m: m.est_weight_mb)
 
 
 def plan(
     host: contracts.HostCapabilities,
     catalog_ref: object = catalog,
     objective: contracts.Objective = contracts.Objective.THROUGHPUT_FIRST,
+    min_context_tokens: int = 0,
 ) -> contracts.ExecutionPlan:
     """Generate a deterministic execution plan from host capabilities.
 
@@ -178,6 +195,9 @@ def plan(
             ``largest_fully_fitting``, ``draft_for`` and ``CATALOG``.
         objective: ``THROUGHPUT_FIRST`` avoids CPU offload;
             ``QUALITY_FIRST`` accepts a PCIe cliff to run a stronger model.
+        min_context_tokens: Minimum required context window. Models with
+            ``max_context_tokens`` below this threshold are excluded from
+            selection. Zero (default) means no constraint.
 
     Returns:
         An immutable ``ExecutionPlan`` ready for the backend seam.
@@ -214,7 +234,7 @@ def plan(
     why.append(f"{weight_quant.value} weights for a ~{usable_total} MB budget")
 
     model = _select_model_for_objective(
-        catalog_ref, weight_quant, weight_budget, objective
+        catalog_ref, weight_quant, weight_budget, objective, min_context_tokens
     )
     kv_budget = usable_total - model.est_weight_mb
     why.append(

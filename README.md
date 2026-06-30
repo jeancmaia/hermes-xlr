@@ -47,17 +47,27 @@ This does everything else:
 - Downloads a GGUF model from Hugging Face (Llama-3.2-3B-Instruct Q4_K_M by default)
 - Installs `hermes-nim-xlr` into the Hermes venv
 - Drops a `.pth` hook so Hermes **auto-registers `XLRTransport`** — every API request
-  carries plan-derived config (`cache_prompt`, KV fraction, CUDA graphs, `n_gpu_layers`, etc.)
+  carries plan-derived config (`cache_prompt`, KV fraction, `n_gpu_layers`, etc.)
 - Configures Hermes to use `http://127.0.0.1:8080/v1` as its provider
 
 > Pass `-ModelPath C:\path\to\your.gguf` if you already have a model.
 > Pass `-ModelRepo` / `-ModelFile` for a different Hugging Face model.
+>
+> Default model: `bartowski/Llama-3.2-3B-Instruct-GGUF` (open-access,
+> 128K context — Hermes-ready). For gated models, set `$env:HF_TOKEN` first.
 
 ### 3. Run
 
 ```powershell
-# Terminal 1 — launch the tuned engine
+# Terminal 1 — launch the tuned engine (auto-detects model in models/)
 .\scripts\start-xlr-engine.ps1
+
+# Terminal 2 — configure provider (first time only)
+hermes model
+# -> Custom endpoint (self-hosted / VLLM / etc.)
+# -> http://127.0.0.1:8080/v1
+# -> (no API key)
+# -> (press Enter to auto-detect model)
 
 # Terminal 2 — start chatting
 hermes
@@ -196,7 +206,7 @@ docs/
 .\scripts\install-xlr.ps1                                # install XLR + model + Hermes hook
 
 # Run
-.\scripts\start-xlr-engine.ps1                          # launch tuned engine
+.\scripts\start-xlr-engine.ps1                          # launch tuned engine (no args needed)
 hermes                                                   # start chatting
 
 # XLR CLI
@@ -206,6 +216,10 @@ uv run xlr benchmark run --endpoint http://127.0.0.1:8080/v1  # A/B benchmark su
 # Diagnostics
 hermes doctor                                            # diagnose Hermes issues
 ```
+
+> `start-xlr-engine.ps1` auto-detects the model in `models/`. Pass
+> `-ModelPath <path>` to override. The engine runs in the foreground;
+> press Ctrl+C to stop it.
 
 ## Status & roadmap
 

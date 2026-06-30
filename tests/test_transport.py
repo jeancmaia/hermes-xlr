@@ -197,7 +197,7 @@ def test_build_kwargs_basic_structure(
 
     assert kwargs["model"] == model
     assert kwargs["messages"] == messages
-    assert "max_tokens" not in kwargs
+    assert kwargs["max_tokens"] == 4096
 
     extra = kwargs["extra_body"]
     assert extra["cache_prompt"] is execution_plan.kv.enable_block_reuse

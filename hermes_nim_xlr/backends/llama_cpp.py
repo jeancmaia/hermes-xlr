@@ -7,6 +7,7 @@ process; enforces the version-match release gate on startup.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -17,6 +18,8 @@ from typing import Any
 
 from hermes_nim_xlr.backends.engine import EngineBackend
 from hermes_nim_xlr.backends.release_gate import assert_engine_checkpoint_match
+
+_logger = logging.getLogger(__name__)
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8080
@@ -113,7 +116,11 @@ class LlamaCppBackend(EngineBackend):
 
     @property
     def serve_endpoint(self) -> str:
-        return f"http://{self._host}:{self._port}/v1"
+        return f"{self._endpoint_base}/v1"
+
+    @property
+    def _endpoint_base(self) -> str:
+        return f"http://{self._host}:{self._port}"
 
     @property
     def engine_info(self) -> dict[str, Any]:
@@ -214,13 +221,47 @@ class LlamaCppBackend(EngineBackend):
         if self._grammar_file is not None:
             cmd.append("--grammar-file")
             cmd.append(self._grammar_file)
+        # --jinja enables native structured tool_calls (not XML-in-text).
+        # Without it, the model can call no tools at all.
+        cmd.append("--jinja")
+        # --cache-prompt enables KV-block reuse across turns.
+        cmd.append("--cache-prompt")
         cmd.extend(self._extra_args)
         return cmd
+
+    def _check_chat_template(self) -> bool:
+        """Probe ``/props`` to verify the engine has a ``chat_template``.
+
+        A missing chat_template means ``--jinja`` is not active and the
+        engine will return tool calls as text instead of structured
+        ``tool_calls``.
+        """
+        url = f"{self._endpoint_base}/props"
+        try:
+            import json as _json
+
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status != 200:
+                    _logger.warning("/props returned %s", resp.status)
+                    return False
+                body = _json.loads(resp.read().decode("utf-8"))
+                if body.get("chat_template"):
+                    return True
+                _logger.warning(
+                    "engine /props has no chat_template — --jinja likely "
+                    "inactive. Tool calls will be returned as text, not "
+                    "structured tool_calls."
+                )
+                return False
+        except (urllib.error.URLError, OSError, _json.JSONDecodeError, TypeError):
+            _logger.warning("could not probe /props for chat_template")
+            return False
 
     def _wait_until_healthy(self) -> bool:
         deadline = time.monotonic() + self._start_timeout
         while time.monotonic() < deadline:
             if self.health():
+                self._check_chat_template()
                 return True
             time.sleep(self._poll_interval)
         return False

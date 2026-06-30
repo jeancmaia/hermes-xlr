@@ -182,7 +182,7 @@ def _extract_spawned_command(backend: LlamaCppBackend) -> list[str]:
 
 
 def test_default_cli_args():
-    """Default constructor emits ctx-size=4096 and no tuning flags."""
+    """Default constructor emits ctx-size=4096, --jinja, --cache-prompt."""
     backend = LlamaCppBackend(
         binary_path=_FAKE_BINARY,
         model_path=_FAKE_MODEL,
@@ -192,6 +192,8 @@ def test_default_cli_args():
     cmd = _extract_spawned_command(backend)
     assert "--ctx-size" in cmd
     assert cmd[cmd.index("--ctx-size") + 1] == "4096"
+    assert "--jinja" in cmd
+    assert "--cache-prompt" in cmd
     assert "--cuda-graphs" not in cmd
     assert "--speculative-ngram" not in cmd
 

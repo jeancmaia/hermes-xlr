@@ -31,7 +31,7 @@ if not _XLR_DISABLED:
         _host = detect()
 
         if _host.gpus:
-            _plan = plan(_host)
+            _plan = plan(_host, min_context_tokens=65536)
 
             class _AutoXLRTransport(XLRTransport):
                 """XLRTransport with plan pre-computed at import time."""
