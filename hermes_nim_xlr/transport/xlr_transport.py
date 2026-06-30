@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
@@ -28,6 +29,8 @@ from agent.transports.types import NormalizedResponse, ToolCall, Usage
 
 import hermes_nim_xlr.transport._safe_tools as _safe_tools_mod
 from hermes_nim_xlr.contracts import ExecutionPlan
+
+_logger = logging.getLogger(__name__)
 
 
 class XLRTransport(ProviderTransport):
@@ -186,12 +189,38 @@ class XLRTransport(ProviderTransport):
             sanitized.append(cleaned)
         return sanitized
 
+    _SKILL_VIEW_STRONG_DESC = (
+        "BEFORE any task: scan the available skills index in your system "
+        "prompt. If a skill name or description matches what you need to "
+        "do, you MUST call this tool to load its full instructions and "
+        "follow them. Do not proceed without checking — skills contain "
+        "critical workflow guidance, scripts, and templates. "
+        "Call with just the skill name first; linked files are returned "
+        "in the response."
+    )
+
     def convert_tools(
         self,
         tools: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Tools are already in OpenAI format — identity."""
-        return tools
+        """Tools are already in OpenAI format — identity.
+
+        Injects a stronger directive description for ``skill_view`` so
+        smaller models get a clearer *when*-to-call signal.
+        """
+        augmented: list[dict[str, Any]] = []
+        for tool in tools:
+            if (
+                isinstance(tool, dict)
+                and tool.get("function", {}).get("name") == "skill_view"
+            ):
+                tool = tool.copy()
+                tool["function"] = {
+                    **tool["function"],
+                    "description": self._SKILL_VIEW_STRONG_DESC,
+                }
+            augmented.append(tool)
+        return augmented
 
     # ------------------------------------------------------------------
     # Build kwargs — wire execution plan params into the API call
@@ -306,6 +335,12 @@ class XLRTransport(ProviderTransport):
                         arguments=tc.function.arguments,
                     )
                 )
+        elif finish_reason == "tool_calls":
+            _logger.warning(
+                "engine returned finish_reason='tool_calls' but msg.tool_calls "
+                "is empty/missing — engine likely started without --jinja. "
+                "Tool calls will be absent."
+            )
 
         usage = None
         if hasattr(response, "usage") and response.usage is not None:
