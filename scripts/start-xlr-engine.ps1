@@ -33,6 +33,23 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+# --- Find Hermes venv (same logic as install-xlr.ps1) ------------------------
+
+$hermesHome = Join-Path $env:USERPROFILE ".hermes"
+$hermesVenv = Join-Path $hermesHome "hermes-agent\venv"
+
+if (-not (Test-Path $hermesVenv)) {
+    $hermesHome = Join-Path $env:LOCALAPPDATA "hermes"
+    $hermesVenv = Join-Path $hermesHome "hermes-agent\venv"
+}
+
+if (Test-Path $hermesVenv) {
+    $hermesPython = Join-Path $hermesVenv "Scripts\python.exe"
+} else {
+    # Fallback: look for a local .venv in the repo root
+    $hermesPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+}
+
 function Write-Step($msg) {
     Write-Host ""
     Write-Host "=== $msg ===" -ForegroundColor Cyan
@@ -67,7 +84,8 @@ if (-not (Test-Path $BinaryPath)) {
 if (-not $ModelPath) {
     $candidates = @(
         (Join-Path $repoRoot "models\Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
-        (Join-Path $env:USERPROFILE ".cache\hermes\models\Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+        (Join-Path $repoRoot "models\Nemotron-Mini-4B-Instruct-Q4_K_M.gguf"),
+        (Join-Path $repoRoot "models\nemotron-mini-4b-instruct-q4_k_m.gguf")
     )
     foreach ($c in $candidates) {
         if (Test-Path $c) { $ModelPath = $c; break }
@@ -96,14 +114,49 @@ Write-OK "Port:    $Port"
 
 Write-Step "DETECT + PLAN"
 
-$planJson = & (Join-Path $repoRoot ".venv\Scripts\python.exe") -c "
-import json, sys
+$planJson = & $hermesPython -c "
+import json, sys, os
 sys.path.insert(0, r'$repoRoot')
-from hermes_nim_xlr.mapper import detect, plan
+from hermes_nim_xlr.mapper.detect import detect
+from hermes_nim_xlr.mapper import plan, catalog
+
 host = detect()
-p = plan(host)
+p = plan(host, min_context_tokens=65536)
+
+# Try to match the loaded GGUF to a catalog entry so derived parameters
+# reflect the actual engine model, not the plan's VRAM-based selection.
+model_path = r'$ModelPath'
+loaded_repo = None
+if os.path.exists(model_path):
+    fname = os.path.basename(model_path).lower()
+    name_map = {
+        'llama-3.2-3b': 'meta-llama/Llama-3.2-3B-Instruct',
+        'llama-3.2-1b': 'Qwen/Qwen2.5-1.5B-Instruct',
+        'qwen2.5-1.5b': 'Qwen/Qwen2.5-1.5B-Instruct',
+        'qwen2.5-0.5b': 'Qwen/Qwen2.5-0.5B-Instruct',
+        'nemotron-mini-4b': 'nvidia/Nemotron-Mini-4B-Instruct',
+        'phi-3.5-mini': 'microsoft/Phi-3.5-mini-instruct',
+        'mistral-7b': 'mistralai/Mistral-7B-Instruct-v0.3',
+        'llama-3.1-8b': 'meta-llama/Llama-3.1-8B-Instruct',
+        'gemma-2-9b': 'google/Gemma-2-9b-it',
+    }
+    for key, repo in name_map.items():
+        if key in fname:
+            loaded_repo = repo
+            break
+
+model_override = False
+if loaded_repo and loaded_repo != p.model.repo:
+    matched = [m for m in catalog.CATALOG if m.repo == loaded_repo and m.weight_quant is p.model.weight_quant]
+    if matched:
+        loaded = matched[0]
+        import dataclasses
+        p = dataclasses.replace(p, model=loaded)
+        model_override = True
+
 print(json.dumps({
     'model': p.model.repo,
+    'model_override': model_override,
     'gpu_layers': p.placement.gpu_layers,
     'total_layers': p.placement.total_layers,
     'ctx_tokens': p.target_ctx_tokens,
@@ -138,6 +191,16 @@ foreach ($note in $plan.rationale) {
     Write-Info "  $note"
 }
 
+# Override ctx-size when the actual model supports more context than
+# the plan's catalog entry suggests (e.g. Llama-3.2-3B has 131K but
+# the plan may have selected a different catalog entry).
+# Hermes Agent needs at least 8K context.
+$minCtx = 65536
+if ($plan.ctx_tokens -lt $minCtx) {
+    Write-Info "Raising ctx-size from $($plan.ctx_tokens) to $minCtx (Hermes minimum)"
+    $plan.ctx_tokens = $minCtx
+}
+
 # --- Build llama-server args ------------------------------------------------
 
 $serverArgs = @(
@@ -150,9 +213,8 @@ $serverArgs = @(
     "--cache-prompt"
 )
 
-if ($plan.cuda_graphs) {
-    $serverArgs += "--cuda-graphs"
-}
+# Note: --cuda-graphs removed — this llama-server build enables CUDA
+# graphs automatically when available.
 
 if ($plan.spec_decode -eq "ngram") {
     $serverArgs += @("--speculative-ngram", "32")
@@ -207,7 +269,7 @@ Write-OK "Engine ready at: $endpoint"
 
 # --- Print Hermes instructions ----------------------------------------------
 
-Write-Step "READY — connect Hermes Agent"
+Write-Step "READY -- connect Hermes Agent"
 
 Write-Host ""
 Write-Host "  In another terminal, run:" -ForegroundColor Yellow

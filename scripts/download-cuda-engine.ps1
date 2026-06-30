@@ -6,7 +6,7 @@
     from GitHub and extracts it to bin/. Also fetches the matching
     CUDA 12.4 runtime DLLs from the cudart companion package.
 .NOTES
-    HER-15 — CUDA llama.cpp bring-up + tool-call validation
+    HER-15 -- CUDA llama.cpp bring-up + tool-call validation
     Target: bin/llama-server.exe + supporting DLLs
     Runtime requirement: NVIDIA driver >= 525.60 (CUDA 12.x)
 #>
@@ -36,8 +36,8 @@ foreach ($pkg in $packages) {
     Write-Host "Downloading $($pkg.Desc)..." -ForegroundColor Cyan
     Write-Host "  $url" -ForegroundColor Gray
     try {
-        $wc = New-Object System.Net.WebClient
-        $wc.DownloadFile($url, $zipPath)
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -ErrorAction Stop
     } catch {
         Write-Host "Download failed: $_" -ForegroundColor Red
         exit 1
